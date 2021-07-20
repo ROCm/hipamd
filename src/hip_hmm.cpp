@@ -1,4 +1,4 @@
-/* Copyright (c) 2020-present Advanced Micro Devices, Inc.
+/* Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -178,7 +178,7 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
 }
 
 // ================================================================================================
-hipError_t hipStreamAttachMemAsync(hipStream_t stream, hipDeviceptr_t* dev_ptr,
+hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr,
                                    size_t length, unsigned int flags) {
   HIP_INIT_API(hipStreamAttachMemAsync, stream, dev_ptr, length, flags);
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-present Advanced Micro Devices, Inc.
+/* Copyright (c) 2019 - 2021 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ class api_callbacks_table_t {
   };
 
   struct hip_cb_table_t {
-    hip_cb_table_entry_t arr[HIP_API_ID_NUMBER] = {};
+    hip_cb_table_entry_t arr[HIP_API_ID_LAST + 1] = {};
   };
 
   api_callbacks_table_t() = default;
@@ -74,7 +74,7 @@ class api_callbacks_table_t {
     std::lock_guard<mutex_t> lock(mutex_);
     bool ret = true;
 
-    if (id < HIP_API_ID_NUMBER) {
+    if (id >= HIP_API_ID_FIRST && id <= HIP_API_ID_LAST) {
       cb_sync(id);
       /*
       'fun != nullptr' indicates it is activity register call,
@@ -112,7 +112,7 @@ class api_callbacks_table_t {
     std::lock_guard<mutex_t> lock(mutex_);
     bool ret = true;
 
-    if (id < HIP_API_ID_NUMBER) {
+    if (id >= HIP_API_ID_FIRST && id <= HIP_API_ID_LAST) {
       cb_sync(id);
       callbacks_table_.arr[id].fun = fun;
       callbacks_table_.arr[id].arg = arg;
@@ -192,7 +192,7 @@ class api_callbacks_spawner_t {
   {
     if (!was_enabled_on_construction_) return;
 
-    if (cid_ >= HIP_API_ID_NUMBER) {
+    if (cid_ < HIP_API_ID_FIRST || cid_ > HIP_API_ID_LAST) {
       fprintf(stderr, "HIP %s bad id %d\n", __FUNCTION__, cid_);
       abort();
     }
@@ -244,7 +244,7 @@ class api_callbacks_spawner_t {
 };
 
 template <>
-class api_callbacks_spawner_t<HIP_API_ID_NUMBER> {
+class api_callbacks_spawner_t<HIP_API_ID_NONE> {
  public:
   api_callbacks_spawner_t() {}
   void call() {}

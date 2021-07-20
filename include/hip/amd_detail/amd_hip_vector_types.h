@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -44,12 +44,11 @@ THE SOFTWARE.
     #endif
 
 #if defined(__cplusplus)
-// FIXME: Temporarily enable C++ headers while mainline headers is outdated.
-//#if !defined(__HIPCC_RTC__)
+#if !defined(__HIPCC_RTC__)
     #include <array>
     #include <iosfwd>
     #include <type_traits>
-//#endif // !defined(__HIPCC_RTC__)
+#endif // !defined(__HIPCC_RTC__)
 
     namespace hip_impl {
         template<typename, typename, unsigned int> struct Scalar_accessor;
@@ -108,6 +107,23 @@ THE SOFTWARE.
             }
 
             // Idea from https://t0rakka.silvrback.com/simd-scalar-accessor
+	    /* Copyright (c) 2012-2019 Twilight Finland 3D Oy Ltd. All rights reserved.
+
+               This software is provided 'as-is', without any express or implied
+               warranty. In no event will the authors be held liable for any damages
+               arising from the use of this software.
+
+               Permission is granted to anyone to use this software for any purpose,
+               including commercial applications, and to alter it and redistribute it
+               freely, subject to the following restrictions:
+
+               1. The origin of this software must not be misrepresented; you must not
+               claim that you wrote the original software. If you use this software
+               in a product, an acknowledgment in the product documentation would be
+               appreciated but is not required.
+               2. Altered source versions must be plainly marked as such, and must not be
+               misrepresented as being the original software.
+               3. This notice may not be removed or altered from any source distribution.*/
             Vector data;
 
             __HOST_DEVICE__

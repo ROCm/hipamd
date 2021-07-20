@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -81,6 +81,14 @@ extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_add_i32(int a
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_and_i32(int a);
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_or_i32(int a);
 
+extern "C" __device__ uint64_t __ockl_fprintf_stderr_begin();
+extern "C" __device__ uint64_t __ockl_fprintf_append_args(uint64_t msg_desc, uint32_t num_args,
+                                                          uint64_t value0, uint64_t value1,
+                                                          uint64_t value2, uint64_t value3,
+                                                          uint64_t value4, uint64_t value5,
+                                                          uint64_t value6, uint32_t is_last);
+extern "C" __device__ uint64_t __ockl_fprintf_append_string_n(uint64_t msg_desc, const char* data,
+                                                              uint64_t length, uint32_t is_last);
 
 // Introduce local address space
 #define __local __attribute__((address_space(3)))
