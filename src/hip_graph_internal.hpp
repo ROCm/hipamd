@@ -32,8 +32,9 @@
 #include "hip_graph_helper.hpp"
 
 typedef hipGraphNode* Node;
+hipError_t ihipValidateKernelParams(const hipKernelNodeParams* pNodeParams);
 
-class hipGraphNode {
+struct hipGraphNode {
  protected:
   uint32_t level_;
   hipGraphNodeType type_;
@@ -58,15 +59,15 @@ class hipGraphNode {
   void SetLevel(uint32_t level) { level_ = level; }
 };
 
-class hipGraph {
+struct ihipGraph {
   std::unordered_map<Node, size_t> nodeInDegree_;   // count of in coming edges for every vertex
   std::unordered_map<Node, size_t> nodeOutDegree_;  // count of outgoing edges for every vertex
   std::vector<Node> vertices_;
   std::unordered_map<Node, std::vector<Node>> edges_;
 
  public:
-  hipGraph() {}
-  ~hipGraph(){};
+  ihipGraph() {}
+  ~ihipGraph(){};
   /// add node to the graph
   hipError_t AddNode(const Node& node);
   /// add edge to the graph
@@ -120,8 +121,26 @@ class hipGraphKernelNode : public hipGraphNode {
   void GetParams(hipKernelNodeParams* params) {
     std::memcpy(params, pKernelParams_, sizeof(hipKernelNodeParams));
   }
-  void SetParams(hipKernelNodeParams* params) {
+  void SetParams(const hipKernelNodeParams* params) {
     std::memcpy(pKernelParams_, params, sizeof(hipKernelNodeParams));
+  }
+  hipError_t SetCommandParams(const hipKernelNodeParams* params) {
+    if (params->func != pKernelParams_->func) {
+      return hipErrorInvalidValue;
+    }
+    // updates kernel params
+    hipError_t status = ihipValidateKernelParams(params);
+    if (hipSuccess != status) {
+      return status;
+    }
+    size_t globalWorkOffset[3] = {0};
+    size_t globalWorkSize[3] = {params->gridDim.x, params->gridDim.y, params->gridDim.z};
+    size_t localWorkSize[3] = {params->blockDim.x, params->blockDim.y, params->blockDim.z};
+    reinterpret_cast<amd::NDRangeKernelCommand*>(commands_[0])
+        ->setSizes(globalWorkOffset, globalWorkSize, localWorkSize);
+    reinterpret_cast<amd::NDRangeKernelCommand*>(commands_[0])
+        ->setSharedMemBytes(params->sharedMemBytes);
+    return hipSuccess;
   }
 };
 
@@ -145,11 +164,10 @@ class hipGraphMemcpyNode : public hipGraphNode {
   void GetParams(hipMemcpy3DParms* params) {
     std::memcpy(params, pCopyParams_, sizeof(hipMemcpy3DParms));
   }
-  void SetParams(hipMemcpy3DParms* params) {
+  void SetParams(const hipMemcpy3DParms* params) {
     std::memcpy(pCopyParams_, params, sizeof(hipMemcpy3DParms));
   }
 };
-
 
 class hipGraphMemcpyNode1D : public hipGraphNode {
   void* dst_;
@@ -263,7 +281,7 @@ class hipGraphMemsetNode : public hipGraphNode {
   void GetParams(hipMemsetParams* params) {
     std::memcpy(params, pMemsetParams_, sizeof(hipMemsetParams));
   }
-  void SetParams(hipMemsetParams* params) {
+  void SetParams(const hipMemsetParams* params) {
     std::memcpy(pMemsetParams_, params, sizeof(hipMemsetParams));
   }
 };
@@ -315,7 +333,21 @@ class hipGraphHostNode : public hipGraphNode {
   }
 };
 
-class hipGraphExec {
+class hipGraphEmptyNode : public hipGraphNode {
+ public:
+  hipGraphEmptyNode() : hipGraphNode(hipGraphNodeTypeEmpty) {}
+  ~hipGraphEmptyNode() {}
+
+  hipError_t CreateCommand(amd::HostQueue* queue) {
+    amd::Command::EventWaitList waitList;
+    commands_.reserve(1);
+    amd::Command* command = new amd::Marker(*queue, !kMarkerDisableFlush, waitList);
+    commands_.emplace_back(command);
+    return hipSuccess;
+  }
+};
+
+struct hipGraphExec {
   std::vector<std::vector<Node>> parallelLists_;
   std::vector<Node> levelOrder_;
   std::unordered_map<Node, std::vector<Node>> nodeWaitLists_;

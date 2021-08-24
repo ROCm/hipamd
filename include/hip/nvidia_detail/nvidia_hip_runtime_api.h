@@ -198,6 +198,9 @@ inline static CUresourcetype hipResourcetype_enumToCUresourcetype(
     }
 }
 
+// hipStreamPerThread
+#define hipStreamPerThread ((cudaStream_t)2)
+
 #define hipTexRef CUtexref
 #define hiparray CUarray
 
@@ -281,6 +284,7 @@ typedef enum cudaMemRangeAttribute hipMemRangeAttribute;
 #define HIP_LAUNCH_PARAM_BUFFER_POINTER CU_LAUNCH_PARAM_BUFFER_POINTER
 #define HIP_LAUNCH_PARAM_BUFFER_SIZE CU_LAUNCH_PARAM_BUFFER_SIZE
 #define HIP_LAUNCH_PARAM_END CU_LAUNCH_PARAM_END
+#define hipLimitPrintfFifoSize cudaLimitPrintfFifoSize
 #define hipLimitMallocHeapSize cudaLimitMallocHeapSize
 #define hipIpcMemLazyEnablePeerAccess cudaIpcMemLazyEnablePeerAccess
 
@@ -1698,7 +1702,7 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
                 attributes->memoryType = hipMemoryTypeHost;
                 break;
             default:
-                return hipErrorUnknown;
+                return hipErrorInvalidValue;
         }
         attributes->device = cPA.device;
         attributes->devicePointer = cPA.devicePointer;
@@ -1967,6 +1971,10 @@ inline static hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) 
 
 inline static hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
     return hipCUDAErrorTohipError(cudaDeviceGetLimit(pValue, limit));
+}
+
+inline static hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
+    return hipCUDAErrorTohipError(cudaDeviceSetLimit(limit, value));
 }
 
 inline static hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) {
@@ -2284,12 +2292,77 @@ inline static hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGr
         cudaGraphAddMemcpyNode(pGraphNode, graph, pDependencies, numDependencies, pCopyParams));
 }
 
+inline static hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                   const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                   void* dst, const void* src, size_t count, hipMemcpyKind kind) {
+    return hipCUDAErrorTohipError(
+        cudaGraphAddMemcpyNode1D(pGraphNode, graph, pDependencies, numDependencies, dst, src, count, kind));
+}
+
 inline static hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                                const hipGraphNode_t* pDependencies,
                                                size_t numDependencies,
                                                const hipMemsetParams* pMemsetParams) {
     return hipCUDAErrorTohipError(
         cudaGraphAddMemsetNode(pGraphNode, graph, pDependencies, numDependencies, pMemsetParams));
+}
+
+inline static hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes,
+                                          size_t* numNodes) {
+    return hipCUDAErrorTohipError(cudaGraphGetNodes(graph, nodes, numNodes));
+}
+
+inline static hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
+                                              size_t* pNumRootNodes) {
+    return hipCUDAErrorTohipError(cudaGraphGetRootNodes(graph, pRootNodes, pNumRootNodes));
+}
+
+inline static hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node,
+                                                     hipKernelNodeParams* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphKernelNodeGetParams(node, pNodeParams));
+}
+
+inline static hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
+                                                     const hipKernelNodeParams* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphKernelNodeSetParams(node, pNodeParams));
+}
+
+inline static hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node,
+                                                     hipMemcpy3DParms* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphMemcpyNodeGetParams(node, pNodeParams));
+}
+
+inline static hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node,
+                                                     const hipMemcpy3DParms* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphMemcpyNodeSetParams(node, pNodeParams));
+}
+
+inline static hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node,
+                                                     hipMemsetParams* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphMemsetNodeGetParams(node, pNodeParams));
+}
+
+inline static hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node,
+                                                     const hipMemsetParams* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphMemsetNodeSetParams(node, pNodeParams));
+}
+
+inline static hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec,
+                                                         hipGraphNode_t node,
+                                                         const hipKernelNodeParams* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphExecKernelNodeSetParams(hGraphExec, node, pNodeParams));
+}
+
+inline static hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
+                                                 const hipGraphNode_t* to, size_t numDependencies) {
+    return hipCUDAErrorTohipError(cudaGraphAddDependencies(graph, from, to, numDependencies));
+}
+
+inline static hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                              const hipGraphNode_t* pDependencies,
+                                              size_t numDependencies) {
+    return hipCUDAErrorTohipError(
+      cudaGraphAddEmptyNode(pGraphNode, graph, pDependencies, numDependencies));
 }
 
 inline static hipError_t hipStreamWriteValue32(hipStream_t stream,

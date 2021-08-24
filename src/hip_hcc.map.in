@@ -172,10 +172,6 @@ global:
     hipStreamQuery;
     hipStreamSynchronize;
     hipStreamWaitEvent;
-    hipStreamWaitValue32;
-    hipStreamWaitValue64;
-    hipStreamWriteValue32;
-    hipStreamWriteValue64;
     __hipPopCallConfiguration;
     __hipPushCallConfiguration;
     __hipRegisterFatBinary;
@@ -295,6 +291,7 @@ global:
     hipGraphAddKernelNode;
     hipGraphAddMemsetNode;
     hipGraphAddMemcpyNode;
+    hipGraphAddMemcpyNode1D;
     hipGraphInstantiate;
     hipGraphLaunch;
     hipStreamIsCapturing;
@@ -314,3 +311,24 @@ global:
 local:
     *;
 } hip_4.2;
+
+hip_4.4 {
+global:
+    hipGraphGetNodes;
+    hipGraphGetRootNodes;
+    hipGraphKernelNodeGetParams;
+    hipGraphKernelNodeSetParams;
+    hipGraphMemcpyNodeGetParams;
+    hipGraphMemcpyNodeSetParams;
+    hipGraphMemsetNodeGetParams;
+    hipGraphMemsetNodeSetParams;
+    hipGraphAddDependencies;
+    hipStreamWaitValue32;
+    hipStreamWaitValue64;
+    hipStreamWriteValue32;
+    hipStreamWriteValue64;
+    hipGraphExecKernelNodeSetParams;
+    hipGraphAddEmptyNode;
+local:
+    *;
+} hip_4.3;

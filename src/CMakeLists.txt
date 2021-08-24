@@ -40,6 +40,8 @@ if(ADDRESS_SANITIZER)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS}")
 endif()
 
+option(DISABLE_DIRECT_DISPATCH "Disable Direct Dispatch" OFF)
+
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -148,6 +150,10 @@ else()
   target_include_directories(amdhip64 PRIVATE $<TARGET_PROPERTY:rocclr,INCLUDE_DIRECTORIES>)
 endif()
 
+if(DISABLE_DIRECT_DISPATCH)
+  target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
+endif()
+
 # Short-Term solution for pre-compiled headers for online compilation
 # Enable pre compiled header
 if(__HIP_ENABLE_PCH)
@@ -238,12 +244,10 @@ if(__HIP_ENABLE_RTC)
   target_link_libraries(amdhip64 PRIVATE ${HIPRTC_GEN_OBJ})
   target_compile_definitions(amdhip64 PRIVATE __HIP_ENABLE_RTC)
   add_dependencies(amdhip64 hiprtc-builtins)
-  # Windows will install the library to the bin directory instead.
-  if(WIN32)
-    install(TARGETS hiprtc-builtins DESTINATION ${CMAKE_INSTALL_BINDIR})
-  else()
-    install(TARGETS hiprtc-builtins DESTINATION lib)
-  endif()
+  install(TARGETS hiprtc-builtins
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
 #############################
@@ -298,7 +302,7 @@ add_custom_command(TARGET amdhip64 POST_BUILD COMMAND
 
 add_library(host INTERFACE)
 target_link_libraries(host INTERFACE amdhip64)
-  
+
 add_library(device INTERFACE)
 target_link_libraries(device INTERFACE host)
 
