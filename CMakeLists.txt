@@ -17,7 +17,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16.8)
 project(hip)
 
 # sample command for hip-rocclr runtime, you'll need to have rocclr built
@@ -42,6 +42,7 @@ option(BUILD_HIPIFY_CLANG "Enable building the CUDA->HIP converter" OFF)
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(__HIP_ENABLE_RTC "Enable/Disable pre-processed hiprtc shared lib" ON)
 option(__HIP_USE_CMPXCHG_FOR_FP_ATOMICS "Enable/Disable FP Atomics version" OFF)
+option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" OFF)
 
 if(__HIP_ENABLE_PCH)
   set(_pchStatus 1)
@@ -49,7 +50,7 @@ else()
   set(_pchStatus 0)
 endif()
 
-if(__HIP_USE_CMPXCHG_FOR_FP_ATOMICS MATCHES "ON")
+if(__HIP_USE_CMPXCHG_FOR_FP_ATOMICS)
   add_definitions(-D__HIP_USE_CMPXCHG_FOR_FP_ATOMICS)
 endif()
 
@@ -81,6 +82,9 @@ execute_process(COMMAND ${PERL_EXECUTABLE} ${__HIPCONFIG_EXECUTABLE__} --version
 string(REPLACE "." ";" VERSION_LIST ${HIP_BASE_VERSION})
 list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
 list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
+list(GET VERSION_LIST 2 HIP_VERSION_PATCH_GITHASH)
+string(REPLACE "-" ";" VERSION_LIST ${HIP_VERSION_PATCH_GITHASH})
+list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
 set(HIP_VERSION_GITDATE 0)
 
 find_package(Git)
@@ -119,22 +123,14 @@ if(GIT_FOUND)
     set(HIP_VERSION_GITHASH ${git_output})
   endif()
 
-  # get commit count
-  execute_process(COMMAND ${GIT_EXECUTABLE} rev-list --count HEAD
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    RESULT_VARIABLE git_result
-    OUTPUT_VARIABLE git_output
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(git_result EQUAL 0)
-    set(HIP_VERSION_GITCOUNT ${git_output})
+  if(NOT DEFINED ENV{HIP_OFFICIAL_BUILD} AND NOT HIP_OFFICIAL_BUILD)
+    set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
   endif()
 
-  set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE}-${HIP_VERSION_GITHASH})
-
   if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_GITDATE}.${HIP_VERSION_GITCOUNT}.$ENV{ROCM_LIBPATCH_VERSION})
+    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
   else()
-    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_GITDATE}.${HIP_VERSION_GITCOUNT}-${HIP_VERSION_GITHASH})
+    set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
   endif()
 else()
   # FIXME: Some parts depend on this being set.
@@ -174,13 +170,14 @@ add_to_config(_versionInfo CPACK_RPM_PACKAGE_RELEASE)
 add_to_config(_versionInfo HIP_VERSION_MAJOR)
 add_to_config(_versionInfo HIP_VERSION_MINOR)
 add_to_config(_versionInfo HIP_VERSION_PATCH)
+add_to_config(_versionInfo HIP_VERSION_GITHASH)
 
 set (HIP_LIB_VERSION_MAJOR ${HIP_VERSION_MAJOR})
 set (HIP_LIB_VERSION_MINOR ${HIP_VERSION_MINOR})
 if (${ROCM_PATCH_VERSION} )
    set (HIP_LIB_VERSION_PATCH ${ROCM_PATCH_VERSION})
 else ()
-   set (HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH})
+   set (HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
 endif ()
 set (HIP_LIB_VERSION_STRING "${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR}.${HIP_LIB_VERSION_PATCH}")
 if (DEFINED ENV{ROCM_RPATH})
@@ -285,7 +282,8 @@ set(_versionInfoHeader
 #define HIP_VERSION_H\n
 #define HIP_VERSION_MAJOR ${HIP_VERSION_MAJOR}
 #define HIP_VERSION_MINOR ${HIP_VERSION_MINOR}
-#define HIP_VERSION_PATCH ${HIP_VERSION_GITDATE}
+#define HIP_VERSION_PATCH ${HIP_VERSION_PATCH}
+#define HIP_VERSION_GITHASH ${HIP_VERSION_GITHASH}
 #define HIP_VERSION       (HIP_VERSION_MAJOR * 100 + HIP_VERSION_MINOR)\n
 #define __HIP_HAS_GET_PCH ${_pchStatus}\n
 #endif\n
@@ -379,11 +377,11 @@ install(
 #############################
 # Packaging steps
 #############################
-# Package: hip_base
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip-base)
-configure_file(packaging/hip-base.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-configure_file(packaging/hip-base.postinst ${BUILD_DIR}/postinst @ONLY)
-configure_file(packaging/hip-base.prerm ${BUILD_DIR}/prerm @ONLY)
+# Package: hip_devel
+set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip-devel)
+configure_file(packaging/hip-devel.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
+configure_file(packaging/hip-devel.postinst ${BUILD_DIR}/postinst @ONLY)
+configure_file(packaging/hip-devel.prerm ${BUILD_DIR}/prerm @ONLY)
 
 add_custom_target(pkg_hip_base COMMAND ${CMAKE_COMMAND} .
     COMMAND rm -rf *.deb *.rpm *.tar.gz
@@ -400,9 +398,9 @@ endif()
 
 if(HIP_RUNTIME STREQUAL "rocclr")
     set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/rocclr)
-    configure_file(packaging/hip-rocclr.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-    configure_file(packaging/hip-rocclr.postinst ${BUILD_DIR}/postinst @ONLY)
-    configure_file(packaging/hip-rocclr.prerm ${BUILD_DIR}/prerm @ONLY)
+    configure_file(packaging/hip-runtime-amd.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
+    configure_file(packaging/hip-runtime-amd.postinst ${BUILD_DIR}/postinst @ONLY)
+    configure_file(packaging/hip-runtime-amd.prerm ${BUILD_DIR}/prerm @ONLY)
     add_custom_target(hip_on_rocclr COMMAND ${CMAKE_COMMAND} .
         COMMAND rm -rf *.deb *.rpm *.tar.gz
         COMMAND make package
@@ -412,9 +410,11 @@ if(HIP_RUNTIME STREQUAL "rocclr")
         WORKING_DIRECTORY ${BUILD_DIR} )
 endif()
 
-# Package: hip_nvcc
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip-nvcc)
-configure_file(packaging/hip-nvcc.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
+# Package: hip_runtime_nvidia
+set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip-runtime-nvidia)
+configure_file(packaging/hip-runtime-nvidia.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
+configure_file(packaging/hip-runtime-nvidia.postinst ${BUILD_DIR}/postinst @ONLY)
+configure_file(packaging/hip-runtime-nvidia.prerm ${BUILD_DIR}/prerm @ONLY)
 add_custom_target(pkg_hip_nvcc COMMAND ${CMAKE_COMMAND} .
     COMMAND rm -rf *.deb *.rpm *.tar.gz
     COMMAND make package

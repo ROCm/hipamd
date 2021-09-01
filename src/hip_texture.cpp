@@ -19,7 +19,7 @@
  THE SOFTWARE. */
 
 #include <hip/hip_runtime.h>
-#include <hip/amd_detail/amd_texture_types.h>
+#include <hip/texture_types.h>
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
@@ -327,9 +327,14 @@ hipError_t ihipDestroyTextureObject(hipTextureObject_t texObject) {
   const bool isImageFromBuffer = (type == hipResourceTypeLinear) || (type == hipResourceTypePitch2D);
   const bool isImageView = ((type == hipResourceTypeArray) || (type == hipResourceTypeMipmappedArray)) &&
                            !texObject->image->isParent();
+  // If the texture object was created from an array, then the array owns the image SRD.
+  // Otherwise, if the texture object is a view, or was created from a buffer, then it owns the image SRD.
   if (isImageFromBuffer || isImageView) {
     texObject->image->release();
   }
+
+  // The texture object always owns the sampler SRD.
+  texObject->sampler->release();
 
   // TODO Should call ihipFree() to not polute the api trace.
   return hipFree(texObject);
