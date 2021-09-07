@@ -284,7 +284,7 @@ set(_versionInfoHeader
 #define HIP_VERSION_MINOR ${HIP_VERSION_MINOR}
 #define HIP_VERSION_PATCH ${HIP_VERSION_PATCH}
 #define HIP_VERSION_GITHASH ${HIP_VERSION_GITHASH}
-#define HIP_VERSION       (HIP_VERSION_MAJOR * 100 + HIP_VERSION_MINOR)\n
+#define HIP_VERSION    (HIP_VERSION_MAJOR * 10000000 + HIP_VERSION_MINOR * 100000 + HIP_VERSION_PATCH)\n
 #define __HIP_HAS_GET_PCH ${_pchStatus}\n
 #endif\n
 ")
@@ -343,6 +343,7 @@ endif()
 if(HIP_PLATFORM STREQUAL "amd")
 install(FILES ${PROJECT_BINARY_DIR}/include/hip/amd_detail/hip_prof_str.h
         DESTINATION include/hip/amd_detail)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin DESTINATION . USE_SOURCE_PERMISSIONS)
 endif()
 install(FILES ${PROJECT_BINARY_DIR}/include/hip/hip_version.h
         DESTINATION include/hip)
