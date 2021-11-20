@@ -21,17 +21,18 @@ cmake_minimum_required(VERSION 3.16.8)
 project(hip)
 
 # sample command for hip-rocclr runtime, you'll need to have rocclr built
+# ROCM_PATH is the path where ROCM is installed
 #  For shared lib of hip-rocclr runtime
 #    For release version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
 #    For debug version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
 #  For static lib of hip-rocclr runtime
 #    For release version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
 #    For debug version
-#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="/opt/rocm/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
-#  If you don't specify CMAKE_INSTALL_PREFIX, hip-rocclr runtime will be installed to "/opt/rocm/hip".
+#      cmake -DHIP_COMMON_DIR="$HIP_DIR" -DAMD_OPENCL_PATH=$OPENCL_DIR -DROCCLR_PATH=$ROCCLR_DIR -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="<ROCM_PATH>/" -DCMAKE_INSTALL_PREFIX=</where/to/install/hip> ..
+#  If you don't specify CMAKE_INSTALL_PREFIX, hip-rocclr runtime will be installed to "<ROCM_PATH>/hip".
 #  By default, CMake will search for a folder named vdi or ROCclr relative to the current path. Specify -DROCCLR_PATH=$ROCCLR_DIR if rocclr source is in obscure location.
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
@@ -57,7 +58,15 @@ endif()
 message (STATUS "HIP_COMMON_DIR found at ${HIP_COMMON_DIR}" )
 set(HIP_COMMON_INCLUDE_DIR ${HIP_COMMON_DIR}/include)
 set(HIP_COMMON_BIN_DIR ${HIP_COMMON_DIR}/bin)
+set(HIP_COMMON_SRC_DIR ${HIP_COMMON_DIR}/src)
 set(__HIPCONFIG_EXECUTABLE__ ${HIP_COMMON_DIR}/bin/hipconfig)
+
+
+if(EXISTS ${HIP_COMMON_SRC_DIR})
+  option(BUILD_HIPCONFIG "Build hipconfig/hipcc executable" ON)
+else()
+  option(BUILD_HIPCONFIG "Using hipconfig/hipcc perl scripts" OFF)
+endif()
 
 #############################
 # Setup config generation
@@ -76,15 +85,23 @@ find_package(Perl REQUIRED)
 
 # Determine HIP_BASE_VERSION
 set(ENV{HIP_PATH} "")
-execute_process(COMMAND ${PERL_EXECUTABLE} ${__HIPCONFIG_EXECUTABLE__} --version
-  OUTPUT_VARIABLE HIP_BASE_VERSION
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
-string(REPLACE "." ";" VERSION_LIST ${HIP_BASE_VERSION})
-list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
-list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
-list(GET VERSION_LIST 2 HIP_VERSION_PATCH_GITHASH)
-string(REPLACE "-" ";" VERSION_LIST ${HIP_VERSION_PATCH_GITHASH})
-list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
+
+if (BUILD_HIPCONFIG)
+    #the built executables are copied to build/bin folder
+    add_subdirectory(${HIP_COMMON_SRC_DIR} ./bin) 
+endif()
+
+if (NOT BUILD_HIPCONFIG)
+  execute_process(COMMAND ${PERL_EXECUTABLE} ${__HIPCONFIG_EXECUTABLE__} --version
+    OUTPUT_VARIABLE HIP_BASE_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  string(REPLACE "." ";" VERSION_LIST ${HIP_BASE_VERSION})
+  list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
+  list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
+  list(GET VERSION_LIST 2 HIP_VERSION_PATCH_GITHASH)
+  string(REPLACE "-" ";" VERSION_LIST ${HIP_VERSION_PATCH_GITHASH})
+  list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
+endif()
 set(HIP_VERSION_GITDATE 0)
 
 find_package(Git)
@@ -189,23 +206,28 @@ endif ()
 # overwrite HIP_VERSION_PATCH for packaging
 set(HIP_VERSION ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_PACKAGING_VERSION_PATCH})
 
-# Remove when CI is updated
-if(HIP_PLATFORM STREQUAL "rocclr")
-   set(HIP_PLATFORM "amd")
-endif()
+
 #############################
 # Configure variables
 #############################
 # Determine HIP_PLATFORM
 if(NOT DEFINED HIP_PLATFORM)
-    if(NOT DEFINED ENV{HIP_PLATFORM})
+  if(NOT DEFINED ENV{HIP_PLATFORM})
+    if(BUILD_HIPCONFIG)
+        #HIP_PLATFORM could be set as a command line arg
+        if((HIP_PLATFORM STREQUAL "") OR NOT (HIP_PLATFORM STREQUAL "nvidia" OR HIP_PLATFORM STREQUAL "amd"))
+            set(HIP_PLATFORM "amd" CACHE STRING "HIP Platform")
+            message(STATUS "HIP Platform defaulting to AMD")
+        endif()
+    else() 
         execute_process(COMMAND ${__HIPCONFIG_EXECUTABLE__} --platform
-            OUTPUT_VARIABLE HIP_PLATFORM
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
-    else()
-        set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
+        OUTPUT_VARIABLE HIP_PLATFORM
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
     endif()
-endif()
+  else()
+    set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
+  endif() #end of env hip_platform
+endif() #end of not defined hip_platform
 message(STATUS "HIP Platform: " ${HIP_PLATFORM})
 
 if(HIP_PLATFORM STREQUAL "nvidia")
@@ -229,9 +251,14 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+if (NOT DEFINED ROCM_PATH )
+     set ( ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory." )
+endif ()
+message (STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
+
 # Determine HIP install path
 if (UNIX)
-    set(HIP_DEFAULT_INSTALL_PREFIX "/opt/rocm/hip")
+    set(HIP_DEFAULT_INSTALL_PREFIX "${ROCM_PATH}/hip")
 endif()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Installation path for HIP" FORCE)
@@ -241,7 +268,7 @@ if(DEV_LOG_ENABLE MATCHES "yes")
   add_definitions(-DDEV_LOG_ENABLE)
 endif()
 
-# Set default install path as "/opt/rocm/hip", can override the path from cmake build.
+# Set default install path as "${ROCM_PATH}/hip", can override the path from cmake build.
 set(CPACK_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Package Installation path for HIP")
 
 if(IS_ABSOLUTE ${CMAKE_INSTALL_PREFIX})
@@ -250,15 +277,10 @@ else()
     message(FATAL_ERROR "Don't know where to install HIP. Please specify absolute path using -DCMAKE_INSTALL_PREFIX")
 endif()
 
-if (NOT DEFINED ROCM_PATH )
-     set ( ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory." )
-endif ()
-message (STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
-
 # set the installation path for the installer package
 set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
 if (NOT CPACK_SET_DESTDIR)
-  set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm/hip" CACHE PATH "Default installation path of hcc installer package")
+  set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}/hip" CACHE PATH "Default installation path of hcc installer package")
 endif (NOT CPACK_SET_DESTDIR)
 
 #############################
@@ -328,6 +350,19 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
       install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
               PATTERN *.bat EXCLUDE)
     endif()
+    # installing build/bin hipcc/hipconfig to build/install/bin
+    if(BUILD_HIPCONFIG)
+      if(WIN32)
+        SET(EXE_FILES FILES "${CMAKE_CURRENT_BINARY_DIR}/bin/hipcc.exe" "${CMAKE_CURRENT_BINARY_DIR}/bin/hipconfig.exe")
+      else()
+        SET(EXE_FILES FILES "${CMAKE_CURRENT_BINARY_DIR}/bin/hipcc" "${CMAKE_CURRENT_BINARY_DIR}/bin/hipconfig")
+      endif()
+      FOREACH(EXE_FILE ${EXE_FILES})
+        install(FILES ${EXE_FILE}
+                PERMISSIONS  OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_WRITE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+                DESTINATION ./bin/)
+      ENDFOREACH()
+    endif()
 
     # The following two lines will be removed after upstream updation
     install(CODE "MESSAGE(\"Removing ${CMAKE_INSTALL_PREFIX}/include\")")
@@ -391,6 +426,11 @@ add_custom_target(pkg_hip_base COMMAND ${CMAKE_COMMAND} .
     COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
     COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
     WORKING_DIRECTORY ${BUILD_DIR} )
+# Packaging needs to wait for hipcc/hipconfig to build if it's enabled...
+if (BUILD_HIPCONFIG)
+    add_dependencies(pkg_hip_base hipcc)
+    add_dependencies(pkg_hip_base hipconfig)
+endif()
 
 # Packaging needs to wait for hipify-clang to build if it's enabled...
 if (BUILD_HIPIFY_CLANG)
@@ -464,16 +504,6 @@ endif()
 endif()
 
 #############################
-# Code analysis
-#############################
-# Target: cppcheck
-find_program(CPPCHECK_EXE cppcheck)
-if(CPPCHECK_EXE)
-    add_custom_target(cppcheck COMMAND ${CPPCHECK_EXE} --force --quiet --enable=warning,performance,portability,information,missingInclude src include -I /opt/rocm/include/hcc -I /opt/rocm/include --suppress=*:/opt/rocm/include/hcc/hc.hpp
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-endif()
-
-#############################
 # Code formatting
 #############################
 # Target: clangformat
@@ -519,7 +549,7 @@ endif()
 # Target: clang
 if(HIP_HIPCC_EXECUTABLE)
     add_custom_target(analyze
-        COMMAND ${HIP_HIPCC_EXECUTABLE} -fvisibility=hidden -fvisibility-inlines-hidden --analyze --analyzer-outputtext  -isystem /opt/rocm/include -Wno-unused-command-line-argument -I/opt/rocm/include -c  src/*.cpp -Iinclude/ -I./
+        COMMAND ${HIP_HIPCC_EXECUTABLE} -fvisibility=hidden -fvisibility-inlines-hidden --analyze --analyzer-outputtext  -isystem ${ROCM_PATH}/include -Wno-unused-command-line-argument -I${ROCM_PATH}/include -c  src/*.cpp -Iinclude/ -I./
     WORKING_DIRECTORY ${HIP_SRC_PATH})
     if(CPPCHECK_EXE)
         add_dependencies(analyze cppcheck)

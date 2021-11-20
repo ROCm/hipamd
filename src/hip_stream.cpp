@@ -41,7 +41,8 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
       null_(null_stream),
       cuMask_(cuMask),
       captureStatus_(captureStatus),
-      originStream_(false) {}
+      originStream_(false),
+      captureID_(0) {}
 
 // ================================================================================================
 Stream::~Stream() {
@@ -291,11 +292,14 @@ public:
   ~stream_per_thread() {
     if (m_stream != nullptr && hip::isValid(m_stream)) {
       delete reinterpret_cast<hip::Stream*>(m_stream);
+      m_stream = nullptr;
     }
   }
 
   hipStream_t& get() {
-    if (m_stream == nullptr) {
+    // There is a scenario where hipResetDevice destroys stream per thread
+    // hence isValid check is required to make sure only valid stream is used
+    if (m_stream == nullptr || !hip::isValid(m_stream)) {
       ihipStreamCreate(&m_stream, hipStreamDefault, hip::Stream::Priority::Normal);
     }
     return m_stream;
@@ -371,7 +375,7 @@ hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags) {
 
   if ((flags != nullptr) && (stream != nullptr)) {
     if (!hip::isValid(stream)) {
-      return HIP_RETURN(hipErrorContextIsDestroyed);
+      HIP_RETURN(hipErrorContextIsDestroyed);
     }
     *flags = reinterpret_cast<hip::Stream*>(stream)->Flags();
   } else {
@@ -386,7 +390,7 @@ hipError_t hipStreamSynchronize(hipStream_t stream) {
   HIP_INIT_API(hipStreamSynchronize, stream);
 
   if (!hip::isValid(stream)) {
-    return HIP_RETURN(hipErrorContextIsDestroyed);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   // Wait for the current host queue
@@ -402,9 +406,11 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   if (stream == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
-
+  if (stream == hipStreamPerThread) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
   if (!hip::isValid(stream)) {
-    return HIP_RETURN(hipErrorContextIsDestroyed);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   delete reinterpret_cast<hip::Stream*>(stream);
@@ -412,18 +418,13 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   HIP_RETURN(hipSuccess);
 }
 
-struct CallbackData {
-    int previous_read_index;
-    hip::ihipIpcEventShmem_t *shmem;
-};
-
-void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_data){
-    CallbackData *data = (CallbackData *)user_data;
-    int offset = data->previous_read_index % IPC_SIGNALS_PER_EVENT;
-    while (data->shmem->read_index < data->previous_read_index+IPC_SIGNALS_PER_EVENT
-                    && data->shmem->signal[offset] != 0) {
-    }
-    delete data;
+void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_data) {
+  CallbackData* data = (CallbackData*)user_data;
+  int offset = data->previous_read_index % IPC_SIGNALS_PER_EVENT;
+  while (data->shmem->read_index < data->previous_read_index + IPC_SIGNALS_PER_EVENT &&
+         data->shmem->signal[offset] != 0) {
+  }
+  delete data;
 }
 
 // ================================================================================================
@@ -437,27 +438,11 @@ hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int
   }
 
   if (!hip::isValid(stream)) {
-    return HIP_RETURN(hipErrorContextIsDestroyed);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
-
-  amd::HostQueue* queue = hip::getQueue(stream);
 
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
-  if (e->flags & hipEventInterprocess) {
-    amd::Command* command = new amd::Marker(*queue, false);
-    auto t{new CallbackData{e->ipc_evt_.ipc_shmem_->read_index, e->ipc_evt_.ipc_shmem_}};
-    StreamCallback* cbo = new StreamCallback(stream,
-                    reinterpret_cast<hipStreamCallback_t> (WaitThenDecrementSignal), t, command);
-    if (!command->setCallback(CL_COMPLETE, ihipStreamCallback,cbo)) {
-      command->release();
-      return hipErrorInvalidHandle;
-    }
-    command->enqueue();
-    command->awaitCompletion();
-    HIP_RETURN(hipSuccess);
-  } else {
-    HIP_RETURN(e->streamWait(queue, flags));
-  }
+  HIP_RETURN(e->streamWait(stream, flags));
 }
 
 // ================================================================================================
@@ -465,7 +450,7 @@ hipError_t hipStreamQuery(hipStream_t stream) {
   HIP_INIT_API(hipStreamQuery, stream);
 
   if (!hip::isValid(stream)) {
-    return HIP_RETURN(hipErrorContextIsDestroyed);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   amd::HostQueue* hostQueue = hip::getQueue(stream);
@@ -500,7 +485,7 @@ hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback
   }
 
   if (!hip::isValid(stream)) {
-    return HIP_RETURN(hipErrorContextIsDestroyed);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   amd::HostQueue* hostQueue = hip::getQueue(stream);
@@ -567,7 +552,7 @@ hipError_t hipStreamGetPriority(hipStream_t stream, int* priority) {
 
   if ((priority != nullptr) && (stream != nullptr)) {
     if (!hip::isValid(stream)) {
-      return HIP_RETURN(hipErrorContextIsDestroyed);
+      HIP_RETURN(hipErrorContextIsDestroyed);
     }
     *priority = static_cast<int>(reinterpret_cast<hip::Stream*>(stream)->GetPriority());
   } else {

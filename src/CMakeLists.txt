@@ -58,7 +58,7 @@ else()
 endif()
 
 set_target_properties(amdhip64 PROPERTIES
-  CXX_STANDARD 14
+  CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
@@ -110,7 +110,8 @@ target_sources(amdhip64 PRIVATE
   hip_stream_ops.cpp
   hip_stream.cpp
   hip_surface.cpp
-  hip_texture.cpp)
+  hip_texture.cpp
+  hip_gl.cpp)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE
@@ -135,7 +136,7 @@ target_include_directories(amdhip64
     ${PROJECT_BINARY_DIR}/include)
 
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
-
+target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # Additional dependencies for hipRTC
 if(WIN32)
@@ -160,7 +161,7 @@ endif()
 if(__HIP_ENABLE_PCH)
   find_package(LLVM REQUIRED CONFIG
     PATHS
-      /opt/rocm/llvm)
+      ${ROCM_PATH}/llvm)
   # find_package(LLVM) returns the lib/cmake/llvm location. We require the root.
   if(NOT DEFINED HIP_LLVM_ROOT)
     set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
@@ -180,8 +181,8 @@ if(__HIP_ENABLE_RTC)
   message(STATUS "HIP RTC enabled.")
   include(HIPRTC RESULT_VARIABLE HIPRTC_CMAKE)
   # Requires clang and llvm-mc to create this library.
-  find_package(LLVM REQUIRED CONFIG PATHS /opt/rocm/llvm)
-  find_package(Clang REQUIRED CONFIG PATHS /opt/rocm/llvm)
+  find_package(LLVM REQUIRED CONFIG PATHS ${ROCM_PATH}/llvm)
+  find_package(Clang REQUIRED CONFIG PATHS ${ROCM_PATH}/llvm)
   set(HIPRTC_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/hip_rtc_gen")
   set(HIPRTC_GEN_HEADER "${HIPRTC_GEN_DIR}/hipRTC_header.h")
   set(HIPRTC_GEN_MCIN "${HIPRTC_GEN_DIR}/hipRTC_header.mcin")
@@ -198,7 +199,7 @@ if(__HIP_ENABLE_RTC)
   # FIXME: --hip-version forced to 3.6 to use clang headers, until Windows versioning is fixed.
   add_custom_command(
     OUTPUT ${HIPRTC_GEN_PREPROCESSED}
-    COMMAND $<TARGET_FILE:clang> -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++14 -nogpulib --hip-version=3.6 -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -x hip ${HIPRTC_GEN_HEADER} -E -o ${HIPRTC_GEN_PREPROCESSED}
+    COMMAND $<TARGET_FILE:clang> -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++17 -nogpulib --hip-version=3.6 -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -x hip ${HIPRTC_GEN_HEADER} -E -o ${HIPRTC_GEN_PREPROCESSED}
     COMMAND ${CMAKE_COMMAND} -DHIPRTC_ADD_MACROS=1 -DHIPRTC_PREPROCESSED_FILE=${HIPRTC_GEN_PREPROCESSED} -P ${HIPRTC_CMAKE}
     DEPENDS clang ${HIPRTC_GEN_HEADER})
   add_custom_command(
@@ -307,7 +308,7 @@ target_link_libraries(host INTERFACE amdhip64)
 add_library(device INTERFACE)
 target_link_libraries(device INTERFACE host)
 
-# Current packaging assumes that HIP runtime will always be installed in /opt/rocm/lib
+# Current packaging assumes that HIP runtime will always be installed in ${ROCM_PATH}/lib
 # This is false to assume, because some distros like CentOS will use the lib64 directory instead of lib
 # Relying on CMake to choose the library directory for us will default in that case to lib64
 # Hence there will be a mismatch between where HIP is installed and where CMake thinks it is

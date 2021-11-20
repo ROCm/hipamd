@@ -308,6 +308,12 @@ global:
     hipMemcpy2DToArrayAsync;
     hipDrvMemcpy2DUnaligned;
     hipArrayDestroy;
+    hipGLGetDevices;
+    hipGraphicsGLRegisterBuffer;
+    hipGraphicsMapResources;
+    hipGraphicsResourceGetMappedPointer;
+    hipGraphicsUnmapResources;
+    hipGraphicsUnregisterResource;
 local:
     *;
 } hip_4.2;
@@ -332,3 +338,38 @@ global:
 local:
     *;
 } hip_4.3;
+
+hip_4.5 {
+global:
+    hipStreamUpdateCaptureDependencies;
+    hipGraphRemoveDependencies;
+    hipGraphGetEdges;
+    hipGraphNodeGetDependencies;
+    hipGraphNodeGetDependentNodes;
+    hipGraphNodeGetType;
+    hipGraphDestroyNode;
+    hipGraphClone;
+    hipGraphNodeFindInClone;
+    hipGraphAddChildGraphNode;
+    hipGraphChildGraphNodeGetGraph;
+    hipGraphExecChildGraphNodeSetParams;
+    hipGraphAddMemcpyNodeFromSymbol;
+    hipGraphMemcpyNodeSetParamsFromSymbol;
+    hipGraphExecMemcpyNodeSetParamsFromSymbol;
+    hipGraphAddMemcpyNodeToSymbol;
+    hipGraphMemcpyNodeSetParamsToSymbol;
+    hipGraphExecMemcpyNodeSetParamsToSymbol;
+    hipGraphExecMemcpyNodeSetParams;
+    hipGraphMemcpyNodeSetParams1D;
+    hipGraphExecMemcpyNodeSetParams1D;
+    hipGraphAddEventRecordNode;
+    hipGraphEventRecordNodeGetEvent;
+    hipGraphEventRecordNodeSetEvent;
+    hipGraphExecEventRecordNodeSetEvent;
+    hipGraphAddEventWaitNode;
+    hipGraphEventWaitNodeGetEvent;
+    hipGraphEventWaitNodeSetEvent;
+    hipGraphExecEventWaitNodeSetEvent;
+local:
+    *;
+} hip_4.4;

@@ -388,17 +388,19 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
     return status;
   }
 
-  hip::Event* eStart = reinterpret_cast<hip::Event*>(startEvent);
-  hip::Event* eStop = reinterpret_cast<hip::Event*>(stopEvent);
+  if (startEvent != nullptr) {
+    hip::Event* eStart = reinterpret_cast<hip::Event*>(startEvent);
+    status = eStart->addMarker(hStream, nullptr, true);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
+
   command->enqueue();
 
-  if (startEvent != nullptr) {
-    eStart->addMarker(queue, command, false);
-    command->retain();
-  }
   if (stopEvent != nullptr) {
-    eStop->addMarker(queue, command, true);
-    command->retain();
+    hip::Event* eStop = reinterpret_cast<hip::Event*>(stopEvent);
+    eStop->BindCommand(*command, true);
   }
   command->release();
 
@@ -642,7 +644,7 @@ hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsLi
 {
   HIP_INIT_API(hipLaunchCooperativeKernelMultiDevice, launchParamsList, numDevices, flags);
 
-  return HIP_RETURN(ihipLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags,
+  HIP_RETURN(ihipLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags,
                                                 (amd::NDRangeKernelCommand::CooperativeGroups |
                                                  amd::NDRangeKernelCommand::CooperativeMultiDeviceGroups)));
 }
@@ -651,7 +653,7 @@ hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* launchParamsList,
                                               int numDevices, unsigned int flags) {
   HIP_INIT_API(hipExtLaunchMultiKernelMultiDevice, launchParamsList, numDevices, flags);
 
-  return HIP_RETURN(ihipLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags, 0));
+  HIP_RETURN(ihipLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags, 0));
 }
 
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name) {

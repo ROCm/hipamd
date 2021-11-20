@@ -50,6 +50,17 @@ extern "C" {
 #define __HIP_DEPRECATED
 #endif
 
+// Add Deprecated Support for CUDA Mapped HIP APIs
+#if defined(__DOXYGEN_ONLY__) || defined(HIP_ENABLE_DEPRECATED)
+#define __HIP_DEPRECATED_MSG(msg)
+#elif defined(_MSC_VER)
+#define __HIP_DEPRECATED_MSG(msg) __declspec(deprecated(msg))
+#elif defined(__GNUC__)
+#define __HIP_DEPRECATED_MSG(msg) __attribute__((deprecated(msg)))
+#else
+#define __HIP_DEPRECATED_MSG(msg)
+#endif
+
 
 // TODO -move to include/hip_runtime_api.h as a common implementation.
 /**
@@ -84,6 +95,12 @@ typedef enum hipMemoryAdvise {
 // hip stream operation masks
 #define STREAM_OPS_WAIT_MASK_32 0xFFFFFFFF
 #define STREAM_OPS_WAIT_MASK_64 0xFFFFFFFFFFFFFFFF
+
+// stream operation flags
+#define hipStreamWaitValueGte CU_STREAM_WAIT_VALUE_GEQ
+#define hipStreamWaitValueEq  CU_STREAM_WAIT_VALUE_EQ
+#define hipStreamWaitValueAnd CU_STREAM_WAIT_VALUE_AND
+#define hipStreamWaitValueNor CU_STREAM_WAIT_VALUE_NOR
 
 // hipLibraryPropertyType
 #define hipLibraryPropertyType libraryPropertyType
@@ -957,6 +974,10 @@ typedef enum cudaStreamCaptureStatus hipStreamCaptureStatus;
 #define hipStreamCaptureStatusActive cudaStreamCaptureStatusActive
 #define hipStreamCaptureStatusInvalidated cudaStreamCaptureStatusInvalidated
 
+typedef enum cudaStreamUpdateCaptureDependenciesFlags hipStreamUpdateCaptureDependenciesFlags;
+#define hipStreamAddCaptureDependencies cudaStreamAddCaptureDependencies
+#define hipStreamSetCaptureDependencies cudaStreamSetCaptureDependencies
+
 /**
  * Stream CallBack struct
  */
@@ -992,20 +1013,17 @@ inline static hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent ext
 
 inline static hipError_t hipFree(void* ptr) { return hipCUDAErrorTohipError(cudaFree(ptr)); }
 
-inline static hipError_t hipMallocHost(void** ptr, size_t size)
-    __attribute__((deprecated("use hipHostMalloc instead")));
+__HIP_DEPRECATED_MSG("use hipHostMalloc instead")
 inline static hipError_t hipMallocHost(void** ptr, size_t size) {
     return hipCUDAErrorTohipError(cudaMallocHost(ptr, size));
 }
 
-inline static hipError_t hipMemAllocHost(void** ptr, size_t size)
-    __attribute__((deprecated("use hipHostMalloc instead")));
+__HIP_DEPRECATED_MSG("use hipHostMalloc instead")
 inline static hipError_t hipMemAllocHost(void** ptr, size_t size) {
     return hipCUResultTohipError(cuMemAllocHost(ptr, size));
 }
 
-inline static hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags)
-    __attribute__((deprecated("use hipHostMalloc instead")));
+__HIP_DEPRECATED_MSG("use hipHostMalloc instead")
 inline static hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
     return hipCUDAErrorTohipError(cudaHostAlloc(ptr, size, flags));
 }
@@ -1051,7 +1069,7 @@ inline static hipError_t hipMallocManaged(void** ptr, size_t size, unsigned int 
 }
 
 inline static hipError_t hipMallocArray(hipArray** array, const hipChannelFormatDesc* desc,
-                                        size_t width, size_t height,
+                                        size_t width, size_t height __dparm(0),
                                         unsigned int flags __dparm(hipArrayDefault)) {
     return hipCUDAErrorTohipError(cudaMallocArray(array, desc, width, height, flags));
 }
@@ -1081,8 +1099,7 @@ inline static hipError_t hipHostUnregister(void* ptr) {
     return hipCUDAErrorTohipError(cudaHostUnregister(ptr));
 }
 
-inline static hipError_t hipFreeHost(void* ptr)
-    __attribute__((deprecated("use hipHostFree instead")));
+__HIP_DEPRECATED_MSG("use hipHostFree instead")
 inline static hipError_t hipFreeHost(void* ptr) {
     return hipCUDAErrorTohipError(cudaFreeHost(ptr));
 }
@@ -2360,48 +2377,137 @@ inline static hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGra
       cudaGraphAddEmptyNode(pGraphNode, graph, pDependencies, numDependencies));
 }
 
-inline static hipError_t hipStreamWriteValue32(hipStream_t stream,
-                                               void* ptr, int32_t value, unsigned int flags) {
-   if (value < 0) {
-     printf("Warning! value is negative, CUDA accept positive values\n");
-   }
-   return hipCUResultTohipError(cuStreamWriteValue32(stream, reinterpret_cast<CUdeviceptr>(ptr),
-                                                             static_cast<cuuint32_t>(value), flags));
+inline static hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, int32_t value,
+                                               unsigned int flags) {
+    if (value < 0) {
+        printf("Warning! value is negative, CUDA accept positive values\n");
+    }
+    return hipCUResultTohipError(cuStreamWriteValue32(stream, reinterpret_cast<CUdeviceptr>(ptr),
+                                                      static_cast<cuuint32_t>(value), flags));
 }
 
-inline static hipError_t hipStreamWriteValue64(hipStream_t stream,
-                                               void* ptr, int64_t value, unsigned int flags) {
-   if (value < 0) {
-     printf("Warning! value is negative, CUDA accept positive values\n");
-   }
-   return hipCUResultTohipError(cuStreamWriteValue64(stream, reinterpret_cast<CUdeviceptr>(ptr),
-                                                    static_cast<cuuint64_t>(value), flags));
+inline static hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, int64_t value,
+                                               unsigned int flags) {
+    if (value < 0) {
+        printf("Warning! value is negative, CUDA accept positive values\n");
+    }
+    return hipCUResultTohipError(cuStreamWriteValue64(stream, reinterpret_cast<CUdeviceptr>(ptr),
+                                                      static_cast<cuuint64_t>(value), flags));
 }
 
-inline static hipError_t hipStreamWaitValue32(hipStream_t stream,
-                                              void* ptr, int32_t value, unsigned int flags,
-                                              uint32_t mask) {
-   if (value < 0) {
-     printf("Warning! value is negative, CUDA accept positive values\n");
-   }
-   if (mask != STREAM_OPS_WAIT_MASK_32) {
-     printf("Warning! mask will not have impact as CUDA ignores it.\n");
-   }
-   return hipCUResultTohipError(cuStreamWaitValue32(stream, reinterpret_cast<CUdeviceptr>(ptr),
-                                                    static_cast<cuuint32_t>(value), flags));
+inline static hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr, int32_t value,
+                                              unsigned int flags,
+                                              uint32_t mask __dparm(0xFFFFFFFF)) {
+    if (value < 0) {
+        printf("Warning! value is negative, CUDA accept positive values\n");
+    }
+    if (mask != STREAM_OPS_WAIT_MASK_32) {
+        printf("Warning! mask will not have impact as CUDA ignores it.\n");
+    }
+    return hipCUResultTohipError(cuStreamWaitValue32(stream, reinterpret_cast<CUdeviceptr>(ptr),
+                                                     static_cast<cuuint32_t>(value), flags));
 }
 
-inline static hipError_t hipStreamWaitValue64(hipStream_t stream,
-                                              void* ptr, int64_t value, unsigned int flags,
-                                              uint64_t mask) {
-   if (value < 0) {
-     printf("Warning! value is negative, CUDA accept positive values\n");
-   }
-   if (mask != STREAM_OPS_WAIT_MASK_64) {
-     printf("Warning! mask will not have impact as CUDA ignores it.\n");
-   }
-   return hipCUResultTohipError(cuStreamWaitValue64(stream, reinterpret_cast<CUdeviceptr>(ptr),
-                                                    static_cast<cuuint64_t>(value), flags));
+inline static hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, int64_t value,
+                                              unsigned int flags,
+                                              uint64_t mask __dparm(0xFFFFFFFFFFFFFFFF)) {
+    if (value < 0) {
+        printf("Warning! value is negative, CUDA accept positive values\n");
+    }
+    if (mask != STREAM_OPS_WAIT_MASK_64) {
+        printf("Warning! mask will not have impact as CUDA ignores it.\n");
+    }
+    return hipCUResultTohipError(cuStreamWaitValue64(stream, reinterpret_cast<CUdeviceptr>(ptr),
+                                                     static_cast<cuuint64_t>(value), flags));
+}
+
+inline static hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* from,
+                                                    const hipGraphNode_t* to,
+                                                    size_t numDependencies) {
+    return hipCUDAErrorTohipError(cudaGraphRemoveDependencies(graph, from, to, numDependencies));
+}
+
+
+inline static hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
+                                          hipGraphNode_t* to, size_t* numEdges) {
+    return hipCUDAErrorTohipError(cudaGraphGetEdges(graph, from, to, numEdges));
+}
+
+
+inline static hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node,
+                                                     hipGraphNode_t* pDependencies,
+                                                     size_t* pNumDependencies) {
+    return hipCUDAErrorTohipError(
+        cudaGraphNodeGetDependencies(node, pDependencies, pNumDependencies));
+}
+
+inline static hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
+                                                       hipGraphNode_t* pDependentNodes,
+                                                       size_t* pNumDependentNodes) {
+    return hipCUDAErrorTohipError(
+        cudaGraphNodeGetDependentNodes(node, pDependentNodes, pNumDependentNodes));
+}
+
+inline static hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {
+    return hipCUDAErrorTohipError(cudaGraphNodeGetType(node, pType));
+}
+
+inline static hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
+    return hipCUDAErrorTohipError(cudaGraphDestroyNode(node));
+}
+
+inline static hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph) {
+    return hipCUDAErrorTohipError(cudaGraphClone(pGraphClone, originalGraph));
+}
+
+inline static hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t originalNode,
+                                                 hipGraph_t clonedGraph) {
+    return hipCUDAErrorTohipError(cudaGraphNodeFindInClone(pNode, originalNode, clonedGraph));
+}
+
+inline static hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                                   const hipGraphNode_t* pDependencies,
+                                                   size_t numDependencies, hipGraph_t childGraph) {
+    return hipCUDAErrorTohipError(
+        cudaGraphAddChildGraphNode(pGraphNode, graph, pDependencies, numDependencies, childGraph));
+}
+
+inline static hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGraph) {
+    return hipCUDAErrorTohipError(cudaGraphChildGraphNodeGetGraph(node, pGraph));
+}
+
+inline static hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec,
+                                                             hipGraphNode_t node,
+                                                             hipGraph_t childGraph) {
+    return hipCUDAErrorTohipError(
+        cudaGraphExecChildGraphNodeSetParams(hGraphExec, node, childGraph));
+}
+
+
+inline static hipError_t hipStreamGetCaptureInfo(hipStream_t stream,
+                                                 hipStreamCaptureStatus* pCaptureStatus,
+                                                 unsigned long long* pId) {
+    return hipCUDAErrorTohipError(cudaStreamGetCaptureInfo(stream, pCaptureStatus, pId));
+}
+
+inline static hipError_t hipStreamGetCaptureInfo_v2(
+    hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
+    unsigned long long* id_out __dparm(0), hipGraph_t* graph_out __dparm(0),
+    const hipGraphNode_t** dependencies_out __dparm(0), size_t* numDependencies_out __dparm(0)) {
+    return hipCUDAErrorTohipError(cudaStreamGetCaptureInfo_v2(
+        stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out));
+}
+
+inline static hipError_t hipStreamIsCapturing(hipStream_t stream,
+                                              hipStreamCaptureStatus* pCaptureStatus) {
+    return hipCUDAErrorTohipError(cudaStreamIsCapturing(stream, pCaptureStatus));
+}
+
+inline static hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream,
+                                                            hipGraphNode_t* dependencies,
+                                                            size_t numDependencies,
+                                                            unsigned int flags __dparm(0)) {
+    return hipCUDAErrorTohipError(cudaStreamUpdateCaptureDependencies(stream, dependencies, flags));
 }
 
 #endif  //__CUDACC__
