@@ -19,9 +19,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-ROCMDIR=@ROCM_PATH@
-HIPDIR=$ROCMDIR/hip
+ROCMDIR="@ROCM_PATH@"
+HIPDIR="$ROCMDIR/hip"
 
-if [ -d $ROCMDIR] ; then
-    ln -s -f $ROCMDIR /opt/rocm
+if [ -d "$ROCMDIR" ] ; then
+    ln -s -f "$ROCMDIR" /opt/rocm
 fi
