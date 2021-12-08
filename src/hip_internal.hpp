@@ -72,18 +72,38 @@ typedef struct ihipIpcEventHandle_st {
   inline int getpid() { return _getpid(); }
 #endif
 
-#define HIP_INIT() \
-  std::call_once(hip::g_ihipInitialized, hip::init);       \
-  if (hip::g_device == nullptr && g_devices.size() > 0) {  \
-    hip::g_device = g_devices[0];                          \
+static  amd::Monitor g_hipInitlock{"hipInit lock"};
+#define HIP_INIT() {\
+    amd::ScopedLock lock(g_hipInitlock);                     \
+    if (!amd::Runtime::initialized()) {                      \
+      if (!hip::init()) {                                    \
+        HIP_RETURN(hipErrorInvalidDevice);                   \
+      }                                                      \
+    }                                                        \
+    if (hip::g_device == nullptr && g_devices.size() > 0) {  \
+      hip::g_device = g_devices[0];                          \
+      amd::Os::setPreferredNumaNode(g_devices[0]->devices()[0]->getPreferredNumaNode());  \
+    }                                                        \
   }
+
+#define HIP_INIT_VOID() {\
+    amd::ScopedLock lock(g_hipInitlock);                     \
+    if (!amd::Runtime::initialized()) {                      \
+      if (hip::init()) {}                                    \
+    }                                                        \
+    if (hip::g_device == nullptr && g_devices.size() > 0) {  \
+      hip::g_device = g_devices[0];                          \
+      amd::Os::setPreferredNumaNode(g_devices[0]->devices()[0]->getPreferredNumaNode());  \
+    }                                                        \
+  }
+
 
 #define HIP_API_PRINT(...)                                 \
   uint64_t startTimeUs=0 ; HIPPrintDuration(amd::LOG_INFO, amd::LOG_API, &startTimeUs, "%s%s ( %s )%s", KGRN,    \
           __func__, ToString( __VA_ARGS__ ).c_str(),KNRM);
 
-#define HIP_ERROR_PRINT(err, ...)                             \
-  ClPrint(amd::LOG_INFO, amd::LOG_API, "%s: Returned %s : %s",  \
+#define HIP_ERROR_PRINT(err, ...)                                                  \
+  ClPrint(amd::LOG_INFO, amd::LOG_API, "%s: Returned %s : %s",                     \
           __func__, hipGetErrorName(err), ToString( __VA_ARGS__ ).c_str());
 
 // This macro should be called at the beginning of every HIP API.
@@ -96,10 +116,12 @@ typedef struct ihipIpcEventHandle_st {
   HIP_INIT()                                                 \
   HIP_CB_SPAWNER_OBJECT(cid);
 
-#define HIP_RETURN_DURATION(ret, ...)                      \
-  hip::g_lastError = ret;                         \
-  HIPPrintDuration(amd::LOG_INFO, amd::LOG_API, &startTimeUs, "%s: Returned %s : %s",  \
-          __func__, hipGetErrorName(hip::g_lastError), ToString( __VA_ARGS__ ).c_str()); \
+#define HIP_RETURN_DURATION(ret, ...)                        \
+  hip::g_lastError = ret;                                    \
+  HIPPrintDuration(amd::LOG_INFO, amd::LOG_API, &startTimeUs,                      \
+                   "%s: Returned %s : %s",                                         \
+                   __func__, hipGetErrorName(hip::g_lastError),                    \
+                   ToString( __VA_ARGS__ ).c_str());                               \
   return hip::g_lastError;
 
 #define HIP_RETURN(ret, ...)                      \
@@ -124,6 +146,21 @@ typedef struct ihipIpcEventHandle_st {
       return herror;                     \
     }                                    \
   } while (0);
+
+extern thread_local std::vector<hipStream_t> g_captureStreams;
+
+#define CHECK_STREAM_CAPTURE_SUPPORTED()                                                           \
+  for (auto stream : g_captureStreams) {                                                           \
+    if (reinterpret_cast<hip::Stream*>(stream)->GetCaptureMode() != hipStreamCaptureModeRelaxed) { \
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
+    }                                                                                              \
+  }
+
+// Sync APIs cannot be called when stream capture is active
+#define CHECK_STREAM_CAPTURING()                                                                   \
+  if (!g_captureStreams.empty()) {                                                                 \
+    HIP_RETURN(hipErrorStreamCaptureImplicit);                                                     \
+  }
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
   getStreamPerThread(stream);                                                                      \
@@ -323,14 +360,13 @@ namespace hip {
     amd::HostQueue* NullStream(bool skip_alloc = false);
   };
 
-  extern std::once_flag g_ihipInitialized;
   /// Current thread's device
   extern thread_local Device* g_device;
   extern thread_local hipError_t g_lastError;
   /// Device representing the host - for pinned memory
   extern Device* host_device;
 
-  extern void init();
+  extern bool init();
 
   extern Device* getCurrentDevice();
 

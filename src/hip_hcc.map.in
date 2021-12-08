@@ -370,6 +370,11 @@ global:
     hipGraphEventWaitNodeGetEvent;
     hipGraphEventWaitNodeSetEvent;
     hipGraphExecEventWaitNodeSetEvent;
+    hipGraphAddHostNode;
+    hipGraphHostNodeGetParams;
+    hipGraphHostNodeSetParams;
+    hipGraphExecHostNodeSetParams;
+    hipGraphExecUpdate;
 local:
     *;
 } hip_4.4;

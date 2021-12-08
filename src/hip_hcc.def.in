@@ -338,3 +338,8 @@ hipGraphAddEventWaitNode
 hipGraphEventWaitNodeGetEvent
 hipGraphEventWaitNodeSetEvent
 hipGraphExecEventWaitNodeSetEvent
+hipGraphAddHostNode
+hipGraphHostNodeGetParams
+hipGraphHostNodeSetParams
+hipGraphExecHostNodeSetParams
+hipGraphExecUpdate
