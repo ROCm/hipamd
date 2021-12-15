@@ -209,9 +209,15 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
             Vector data;
 
             __HOST_DEVICE__
-            operator T() const noexcept { return data[idx]; }
+            constexpr operator const T&() const noexcept {
+                return reinterpret_cast<
+                    const T (&)[sizeof(Vector) / sizeof(T)]>(data)[idx];
+            }
             __HOST_DEVICE__
-            operator T() const volatile noexcept { return data[idx]; }
+            constexpr operator const volatile T&() const volatile noexcept {
+                return reinterpret_cast<
+                    const volatile T (&)[sizeof(Vector) / sizeof(T)]>(data)[idx];
+            }
 
 #ifdef __HIP_ENABLE_VECTOR_SCALAR_ACCESSORY_ENUM_CONVERSION__
             // The conversions to enum are fairly ghastly, but unfortunately used in
