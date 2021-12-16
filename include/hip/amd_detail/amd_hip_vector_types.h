@@ -811,7 +811,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator+=(const HIP_vector_type& x) noexcept
         {
-            data += x.data;
+            #if __has_attribute(ext_vector_type)
+                data += x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] += x.data[i];
+            #endif
             return *this;
         }
         template<
@@ -827,7 +832,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator-=(const HIP_vector_type& x) noexcept
         {
-            data -= x.data;
+            #if __has_attribute(ext_vector_type)
+                data -= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] -= x.data[i];
+            #endif
             return *this;
         }
         template<
@@ -843,7 +853,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator*=(const HIP_vector_type& x) noexcept
         {
-            data *= x.data;
+            #if __has_attribute(ext_vector_type)
+                data *= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] *= x.data[i];
+            #endif
             return *this;
         }
         template<
@@ -859,7 +874,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator/=(const HIP_vector_type& x) noexcept
         {
-            data /= x.data;
+            #if __has_attribute(ext_vector_type)
+                data /= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] /= x.data[i];
+            #endif
             return *this;
         }
         template<
@@ -879,7 +899,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         HIP_vector_type operator-() const noexcept
         {
             auto tmp(*this);
-            tmp.data = -tmp.data;
+            #if __has_attribute(ext_vector_type)
+                tmp.data = -tmp.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    tmp.data[i] = -tmp.data[i];
+            #endif
             return tmp;
         }
 
@@ -890,7 +915,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         HIP_vector_type operator~() const noexcept
         {
             HIP_vector_type r{*this};
-            r.data = ~r.data;
+            #if __has_attribute(ext_vector_type)
+                r.data = ~r.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    r.data[i] = ~r.data[i];
+            #endif
             return r;
         }
 
@@ -900,7 +930,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator%=(const HIP_vector_type& x) noexcept
         {
-            data %= x.data;
+            #if __has_attribute(ext_vector_type)
+                data %= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] %= x.data[i];
+            #endif
             return *this;
         }
 
@@ -910,7 +945,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator^=(const HIP_vector_type& x) noexcept
         {
-            data ^= x.data;
+            #if __has_attribute(ext_vector_type)
+                data ^= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] ^= x.data[i];
+            #endif
             return *this;
         }
 
@@ -920,7 +960,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator|=(const HIP_vector_type& x) noexcept
         {
-            data |= x.data;
+            #if __has_attribute(ext_vector_type)
+                data |= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] |= x.data[i];
+            #endif
             return *this;
         }
 
@@ -930,7 +975,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator&=(const HIP_vector_type& x) noexcept
         {
-            data &= x.data;
+            #if __has_attribute(ext_vector_type)
+                data &= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] &= x.data[i];
+            #endif
             return *this;
         }
 
@@ -940,7 +990,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator>>=(const HIP_vector_type& x) noexcept
         {
-            data >>= x.data;
+            #if __has_attribute(ext_vector_type)
+                data >>= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] >>= x.data[i];
+            #endif
             return *this;
         }
 
@@ -950,7 +1005,12 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         __HOST_DEVICE__
         HIP_vector_type& operator<<=(const HIP_vector_type& x) noexcept
         {
-            data <<= x.data;
+            #if __has_attribute(ext_vector_type)
+                data <<= x.data;
+            #else
+                for (auto i = 0u; i < rank; ++i)
+                    data[i] <<= x.data[i];
+            #endif
             return *this;
         }
     };
