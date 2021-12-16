@@ -955,6 +955,13 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         }
     };
 
+    // comfort type to only enable an operator if U can be converted to
+    // a HIP_vector_type<T, N>
+    template<typename U, typename T, unsigned int n,
+        typename R=HIP_vector_type<T, n> /* operator return value */>
+    using enable_if_convertible = typename
+        std::enable_if<std::is_convertible<U, HIP_vector_type<T, n>>::value, R>::type;
+
     template<typename T, unsigned int n>
     __HOST_DEVICE__
     inline
@@ -968,7 +975,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator+(
+    enable_if_convertible<U, T, n> operator+(
         const HIP_vector_type<T, n>& x, U y) noexcept
     {
         return HIP_vector_type<T, n>{x} += HIP_vector_type<T, n>{y};
@@ -977,7 +984,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator+(
+    enable_if_convertible<U, T, n> operator+(
         U x, const HIP_vector_type<T, n>& y) noexcept
     {
         return HIP_vector_type<T, n>{x} += y;
@@ -996,7 +1003,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator-(
+    enable_if_convertible<U, T, n> operator-(
         const HIP_vector_type<T, n>& x, U y) noexcept
     {
         return HIP_vector_type<T, n>{x} -= HIP_vector_type<T, n>{y};
@@ -1005,7 +1012,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator-(
+    enable_if_convertible<U, T, n> operator-(
         U x, const HIP_vector_type<T, n>& y) noexcept
     {
         return HIP_vector_type<T, n>{x} -= y;
@@ -1024,7 +1031,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator*(
+    enable_if_convertible<U, T, n> operator*(
         const HIP_vector_type<T, n>& x, U y) noexcept
     {
         return HIP_vector_type<T, n>{x} *= HIP_vector_type<T, n>{y};
@@ -1033,7 +1040,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator*(
+    enable_if_convertible<U, T, n> operator*(
         U x, const HIP_vector_type<T, n>& y) noexcept
     {
         return HIP_vector_type<T, n>{x} *= y;
@@ -1052,7 +1059,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator/(
+    enable_if_convertible<U, T, n> operator/(
         const HIP_vector_type<T, n>& x, U y) noexcept
     {
         return HIP_vector_type<T, n>{x} /= HIP_vector_type<T, n>{y};
@@ -1061,7 +1068,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    HIP_vector_type<T, n> operator/(
+    enable_if_convertible<U, T, n> operator/(
         U x, const HIP_vector_type<T, n>& y) noexcept
     {
         return HIP_vector_type<T, n>{x} /= y;
@@ -1090,7 +1097,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    bool operator==(const HIP_vector_type<T, n>& x, U y) noexcept
+    enable_if_convertible<U, T, n, bool> operator==(const HIP_vector_type<T, n>& x, U y) noexcept
     {
         return x == HIP_vector_type<T, n>{y};
     }
@@ -1098,7 +1105,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    bool operator==(U x, const HIP_vector_type<T, n>& y) noexcept
+    enable_if_convertible<U, T, n, bool> operator==(U x, const HIP_vector_type<T, n>& y) noexcept
     {
         return HIP_vector_type<T, n>{x} == y;
     }
@@ -1116,7 +1123,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    bool operator!=(const HIP_vector_type<T, n>& x, U y) noexcept
+    enable_if_convertible<U, T, n, bool> operator!=(const HIP_vector_type<T, n>& x, U y) noexcept
     {
         return !(x == y);
     }
@@ -1124,7 +1131,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
     __HOST_DEVICE__
     inline
     constexpr
-    bool operator!=(U x, const HIP_vector_type<T, n>& y) noexcept
+    enable_if_convertible<U, T, n, bool> operator!=(U x, const HIP_vector_type<T, n>& y) noexcept
     {
         return !(x == y);
     }
