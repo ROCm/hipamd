@@ -343,3 +343,8 @@ hipGraphHostNodeGetParams
 hipGraphHostNodeSetParams
 hipGraphExecHostNodeSetParams
 hipGraphExecUpdate
+hipGraphInstantiateWithFlags
+hipGraphExecMemsetNodeSetParams
+amd_dbgapi_get_build_name
+amd_dbgapi_get_git_hash
+amd_dbgapi_get_build_id
