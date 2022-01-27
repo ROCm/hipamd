@@ -308,6 +308,8 @@ namespace hip {
     }
     /// Get Capture ID
     int GetCaptureID() { return captureID_; }
+    void SetCaptureEvent(hipEvent_t e) { captureEvents_.push_back(e); }
+    void SetParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.push_back(s); }
   };
 
   /// HIP Device class
@@ -433,6 +435,10 @@ extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset);
 extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size);
 extern void getStreamPerThread(hipStream_t& stream);
 extern hipError_t ihipUnbindTexture(textureReference* texRef);
+
+extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
+
+extern hipError_t ihipDeviceGet(hipDevice_t* device, int deviceId);
 
 constexpr bool kOptionChangeable = true;
 constexpr bool kNewDevProg = false;
