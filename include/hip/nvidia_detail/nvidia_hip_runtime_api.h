@@ -1719,6 +1719,9 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
             case cudaMemoryTypeHost:
                 attributes->memoryType = hipMemoryTypeHost;
                 break;
+            case cudaMemoryTypeManaged:
+                attributes->memoryType = hipMemoryTypeUnified;
+                break;
             default:
                 return hipErrorInvalidValue;
         }
