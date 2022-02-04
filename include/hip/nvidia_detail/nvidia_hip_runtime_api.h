@@ -1707,10 +1707,10 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
     struct cudaPointerAttributes cPA;
     hipError_t err = hipCUDAErrorTohipError(cudaPointerGetAttributes(&cPA, ptr));
     if (err == hipSuccess) {
-#if (CUDART_VERSION >= 11000)
-        auto memType = cPA.type;
+#if (CUDART_VERSION >= 10000)
+        cudaMemoryType memType = cPA.type;
 #else
-        unsigned memType = cPA.memoryType; // No auto because cuda 10.2 doesnt force c++11
+        cudaMemoryType memType = cPA.memoryType; // No auto because cuda 10.2 doesnt force c++11
 #endif
         switch (memType) {
             case cudaMemoryTypeDevice:
@@ -1719,9 +1719,11 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
             case cudaMemoryTypeHost:
                 attributes->memoryType = hipMemoryTypeHost;
                 break;
+#if (CUDART_VERSION >= 10000)
             case cudaMemoryTypeManaged:
                 attributes->memoryType = hipMemoryTypeUnified;
                 break;
+#endif
             default:
                 return hipErrorInvalidValue;
         }
