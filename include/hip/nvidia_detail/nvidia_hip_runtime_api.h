@@ -975,7 +975,9 @@ typedef enum cudaStreamCaptureStatus hipStreamCaptureStatus;
 #define hipStreamCaptureStatusActive cudaStreamCaptureStatusActive
 #define hipStreamCaptureStatusInvalidated cudaStreamCaptureStatusInvalidated
 
+#if (CUDART_VERSION >= 11030)
 typedef enum cudaStreamUpdateCaptureDependenciesFlags hipStreamUpdateCaptureDependenciesFlags;
+#endif
 #define hipStreamAddCaptureDependencies cudaStreamAddCaptureDependencies
 #define hipStreamSetCaptureDependencies cudaStreamSetCaptureDependencies
 
@@ -2305,12 +2307,14 @@ inline static hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGr
         cudaGraphAddMemcpyNode(pGraphNode, graph, pDependencies, numDependencies, pCopyParams));
 }
 
+#if (CUDART_VERSION >= 11010)
 inline static hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                    const hipGraphNode_t* pDependencies, size_t numDependencies,
                                    void* dst, const void* src, size_t count, hipMemcpyKind kind) {
     return hipCUDAErrorTohipError(
         cudaGraphAddMemcpyNode1D(pGraphNode, graph, pDependencies, numDependencies, dst, src, count, kind));
 }
+#endif
 
 inline static hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                                const hipGraphNode_t* pDependencies,
@@ -2476,12 +2480,14 @@ inline static hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hip
     return hipCUDAErrorTohipError(cudaGraphChildGraphNodeGetGraph(node, pGraph));
 }
 
+#if (CUDART_VERSION >= 11010)
 inline static hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec,
                                                              hipGraphNode_t node,
                                                              hipGraph_t childGraph) {
     return hipCUDAErrorTohipError(
         cudaGraphExecChildGraphNodeSetParams(hGraphExec, node, childGraph));
 }
+#endif
 
 inline static hipError_t hipStreamGetCaptureInfo(hipStream_t stream,
                                                  hipStreamCaptureStatus* pCaptureStatus,
@@ -2489,6 +2495,7 @@ inline static hipError_t hipStreamGetCaptureInfo(hipStream_t stream,
     return hipCUDAErrorTohipError(cudaStreamGetCaptureInfo(stream, pCaptureStatus, pId));
 }
 
+#if (CUDART_VERSION >= 11030)
 inline static hipError_t hipStreamGetCaptureInfo_v2(
     hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
     unsigned long long* id_out __dparm(0), hipGraph_t* graph_out __dparm(0),
@@ -2496,19 +2503,23 @@ inline static hipError_t hipStreamGetCaptureInfo_v2(
     return hipCUDAErrorTohipError(cudaStreamGetCaptureInfo_v2(
         stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out));
 }
+#endif
 
 inline static hipError_t hipStreamIsCapturing(hipStream_t stream,
                                               hipStreamCaptureStatus* pCaptureStatus) {
     return hipCUDAErrorTohipError(cudaStreamIsCapturing(stream, pCaptureStatus));
 }
 
+#if (CUDART_VERSION >= 11030)
 inline static hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream,
                                                             hipGraphNode_t* dependencies,
                                                             size_t numDependencies,
                                                             unsigned int flags __dparm(0)) {
     return hipCUDAErrorTohipError(cudaStreamUpdateCaptureDependencies(stream, dependencies, flags));
 }
+#endif
 
+#if (CUDART_VERSION >= 11010)
 inline static hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                                     const hipGraphNode_t* pDependencies,
                                                     size_t numDependencies, hipEvent_t event) {
@@ -2522,6 +2533,7 @@ inline static hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hi
     return hipCUDAErrorTohipError(
         cudaGraphAddEventWaitNode(pGraphNode, graph, pDependencies, numDependencies, event));
 }
+#endif
 
 inline static hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                              const hipGraphNode_t* pDependencies,
@@ -2531,6 +2543,7 @@ inline static hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGrap
         cudaGraphAddHostNode(pGraphNode, graph, pDependencies, numDependencies, pNodeParams));
 }
 
+#if (CUDART_VERSION >= 11010)
 inline static hipError_t hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode,
                                                          hipGraph_t graph,
                                                          const hipGraphNode_t* pDependencies,
@@ -2561,6 +2574,7 @@ inline static hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node, hipE
 inline static hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node, hipEvent_t event) {
     return hipCUDAErrorTohipError(cudaGraphEventWaitNodeSetEvent(node, event));
 }
+#endif
 
 inline static hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec,
                                                        hipGraphNode_t node,
@@ -2574,6 +2588,7 @@ inline static hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphEx
     return hipCUDAErrorTohipError(cudaGraphExecMemcpyNodeSetParams(hGraphExec, node, pNodeParams));
 }
 
+#if (CUDART_VERSION >= 11010)
 inline static hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec,
                                                            hipGraphNode_t node, void* dst,
                                                            const void* src, size_t count,
@@ -2597,6 +2612,7 @@ inline static hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(
     return hipCUDAErrorTohipError(cudaGraphExecMemcpyNodeSetParamsToSymbol(
         hGraphExec, node, symbol, src, count, offset, kind));
 }
+#endif
 
 inline static hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec,
                                                          hipGraphNode_t node,
@@ -2611,6 +2627,7 @@ inline static hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_
         cudaGraphExecUpdate(hGraphExec, hGraph, hErrorNode_out, updateResult_out));
 }
 
+#if (CUDART_VERSION >= 11010)
 inline static hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(hipGraphNode_t node, void* dst,
                                                                const void* symbol, size_t count,
                                                                size_t offset, hipMemcpyKind kind) {
@@ -2630,12 +2647,14 @@ inline static hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node,
                                                          hipEvent_t* event_out) {
     return hipCUDAErrorTohipError(cudaGraphEventRecordNodeGetEvent(node, event_out));
 }
+#endif
 
 inline static hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node,
                                                    hipHostNodeParams* pNodeParams) {
     return hipCUDAErrorTohipError(cudaGraphHostNodeGetParams(node, pNodeParams));
 }
 
+#if (CUDART_VERSION >= 11010)
 inline static hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst,
                                                        const void* src, size_t count,
                                                        hipMemcpyKind kind) {
@@ -2652,6 +2671,7 @@ inline static hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t hGraph
                                                            hipGraphNode_t hNode, hipEvent_t event) {
     return hipCUDAErrorTohipError(cudaGraphExecEventWaitNodeSetEvent(hGraphExec, hNode, event));
 }
+#endif
 
 inline static hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node,
                                                    const hipHostNodeParams* pNodeParams) {
