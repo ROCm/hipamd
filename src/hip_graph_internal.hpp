@@ -146,17 +146,32 @@ struct hipGraphNode {
       edges_.push_back(entry);
     }
   }
+  /// Update level, for existing edges
+  void UpdateEdgeLevel() {
+    for (auto edge : edges_) {
+      edge->SetLevel(std::max(edge->GetLevel(), GetLevel() + 1));
+      edge->UpdateEdgeLevel();
+    }
+  }
   /// Add edge, update parent node outdegree, child node indegree, level and dependency
   void AddEdge(const Node& childNode) {
     edges_.push_back(childNode);
     outDegree_++;
     childNode->SetInDegree(childNode->GetInDegree() + 1);
     childNode->SetLevel(std::max(childNode->GetLevel(), GetLevel() + 1));
+    childNode->UpdateEdgeLevel();
     childNode->AddDependency(this);
   }
   /// Remove edge, update parent node outdegree, child node indegree, level and dependency
-  void RemoveEdge(const Node& childNode) {
-    edges_.erase(std::remove(edges_.begin(), edges_.end(), childNode), edges_.end());
+  bool RemoveEdge(const Node& childNode) {
+    // std::remove changes the end() hence saving it before hand for validation
+    auto currEdgeEnd = edges_.end();
+    auto it = std::remove(edges_.begin(), edges_.end(), childNode);
+    if (it == currEdgeEnd) {
+      // Should come here if childNode is not present in the edge list
+      return false;
+    }
+    edges_.erase(it, edges_.end());
     outDegree_--;
     childNode->SetInDegree(childNode->GetInDegree() - 1);
     const std::vector<Node>& dependencies = childNode->GetDependencies();
@@ -168,6 +183,7 @@ struct hipGraphNode {
     }
     childNode->SetLevel(level);
     childNode->RemoveDependency(this);
+    return true;
   }
   /// Get Runlist of the nodes embedded as part of the graphnode(e.g. ChildGraph)
   virtual void GetRunList(std::vector<std::vector<Node>>& parallelList,
@@ -700,6 +716,26 @@ class hipGraphMemcpyNodeToSymbol : public hipGraphMemcpyNode1D {
 
   hipError_t SetParams(const void* symbol, const void* src, size_t count, size_t offset,
                        hipMemcpyKind kind) {
+
+    size_t zeroOffset = 0;
+    amd::Memory* srcMemory = getMemoryObject(src, zeroOffset);
+    amd::Memory* dstMemory = getMemoryObject(symbol, zeroOffset);
+    hipMemoryType srcMemoryType =
+        amd::MemObjMap::FindMemObj(srcMemory) ? hipMemoryTypeDevice : hipMemoryTypeHost;
+    hipMemoryType dstMemoryType =
+        amd::MemObjMap::FindMemObj(dstMemory) ? hipMemoryTypeDevice : hipMemoryTypeHost;
+
+    // Return error if sizeBytes passed to memcpy is more than the actual size allocated
+    if ((dstMemory && count > (dstMemory->getSize() - offset)) ||
+        (srcMemory && count > (srcMemory->getSize() - offset))) {
+      return hipErrorInvalidValue;
+    }
+    // check the kind with memory types
+    if (std::get<0>(hip::getMemoryType(kind)) != srcMemoryType)
+      return hipErrorInvalidValue;
+    if (std::get<1>(hip::getMemoryType(kind)) != dstMemoryType)
+        return hipErrorInvalidValue;
+
     size_t sym_size = 0;
     hipDeviceptr_t device_ptr = nullptr;
 
@@ -775,9 +811,22 @@ class hipGraphMemsetNode : public hipGraphNode {
     std::memcpy(params, pMemsetParams_, sizeof(hipMemsetParams));
   }
   hipError_t SetParams(const hipMemsetParams* params) {
+
     hipError_t hip_error = hipSuccess;
-    hip_error = ihipMemset_validate(params->dst, params->value, params->elementSize,
-                                    params->width * params->elementSize);
+    hip_error = ihipGraphMemsetParams_validate(params);
+    if (hip_error != hipSuccess) {
+      return hip_error;
+    }
+    if (params->height == 1) {
+      hip_error = ihipMemset_validate(params->dst, params->value, params->elementSize,
+                                      params->width * params->elementSize);
+    } else {
+      auto sizeBytes = params->width * params->height * 1;
+      hip_error = ihipMemset3D_validate(
+          {params->dst, params->pitch, params->width, params->height},
+          params->value, {params->width, params->height, 1}, sizeBytes);
+    }
+
     if (hip_error != hipSuccess) {
       return hip_error;
     }

@@ -122,6 +122,10 @@ hipError_t ihipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     return hipErrorInvalidValue;
   }
   hipError_t status;
+  status = ihipGraphMemsetParams_validate(pMemsetParams);
+  if (status != hipSuccess) {
+    return status;
+  }
   if (pMemsetParams->height == 1) {
     status =
         ihipMemset_validate(pMemsetParams->dst, pMemsetParams->value, pMemsetParams->elementSize,
@@ -1030,7 +1034,11 @@ hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParam
 hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                            const hipMemsetParams* pNodeParams) {
   HIP_INIT_API(hipGraphExecMemsetNodeSetParams, hGraphExec, node, pNodeParams);
-  if (hGraphExec == nullptr || node == nullptr || pNodeParams == nullptr) {
+  if (hGraphExec == nullptr || node == nullptr || pNodeParams == nullptr ||
+      pNodeParams->dst == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (ihipGraphMemsetParams_validate(pNodeParams) != hipSuccess) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hipGraphNode_t clonedNode = hGraphExec->GetClonedNode(node);
@@ -1177,7 +1185,9 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
     HIP_RETURN(hipErrorInvalidValue);
   }
   for (size_t i = 0; i < numDependencies; i++) {
-    from[i]->RemoveEdge(to[i]);
+    if (from[i]->RemoveEdge(to[i]) == false) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
   }
   HIP_RETURN(hipSuccess);
 }
@@ -1185,7 +1195,8 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
 hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                             size_t* numEdges) {
   HIP_INIT_API(hipGraphGetEdges, graph, from, to, numEdges);
-  if (graph == nullptr || numEdges == nullptr) {
+  if (graph == nullptr || numEdges == nullptr ||
+      from == nullptr || to == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   const std::vector<std::pair<Node, Node>> edges = graph->GetEdges();
@@ -1360,6 +1371,10 @@ hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t 
                                          hipMemcpyKind kind) {
   HIP_INIT_API(hipGraphAddMemcpyNodeToSymbol, pGraphNode, graph, pDependencies, numDependencies,
                symbol, src, count, offset, kind);
+  if (pGraphNode == nullptr || graph == nullptr || src == nullptr ||
+    (pDependencies == nullptr && numDependencies > 0)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   size_t sym_size = 0;
   hipDeviceptr_t device_ptr = nullptr;
   hipError_t status = ihipMemcpySymbol_validate(symbol, count, offset, sym_size, device_ptr);
@@ -1367,6 +1382,9 @@ hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t 
     HIP_RETURN(status);
   }
   *pGraphNode = new hipGraphMemcpyNodeToSymbol(symbol, src, count, offset, kind);
+  if (*pGraphNode == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies);
   HIP_RETURN(hipSuccess);
 }
@@ -1375,6 +1393,13 @@ hipError_t hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* 
                                                const void* src, size_t count, size_t offset,
                                                hipMemcpyKind kind) {
   HIP_INIT_API(hipGraphMemcpyNodeSetParamsToSymbol, symbol, src, count, offset, kind);
+  if (node == nullptr || src == nullptr || count == 0 || symbol == src) {
+    return hipErrorInvalidValue;
+  }
+  if (symbol  == nullptr) {
+    return hipErrorInvalidSymbol;
+  }
+
   HIP_RETURN(reinterpret_cast<hipGraphMemcpyNodeToSymbol*>(node)->SetParams(symbol, src, count,
                                                                             offset, kind));
 }
@@ -1483,7 +1508,7 @@ hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                const hipGraphNode_t* pDependencies, size_t numDependencies,
                                const hipHostNodeParams* pNodeParams) {
   HIP_INIT_API(hipGraphAddHostNode, pGraphNode, graph, pDependencies, numDependencies, pNodeParams);
-  if (pGraphNode == nullptr || graph == nullptr ||
+  if (pGraphNode == nullptr || graph == nullptr || pNodeParams == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }

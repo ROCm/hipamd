@@ -36,6 +36,12 @@ project(hip)
 #  By default, CMake will search for a folder named vdi or ROCclr relative to the current path. Specify -DROCCLR_PATH=$ROCCLR_DIR if rocclr source is in obscure location.
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
+
+# required to add the right link to libhsa-runtime in install/lib path
+# CMAKE_PREFIX_PATH is used as rpath to search for libs outside HIP
+set(CMAKE_INSTALL_RPATH "${CMAKE_PREFIX_PATH}/lib")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 #############################
 # Options
 #############################
@@ -44,6 +50,7 @@ option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(__HIP_ENABLE_RTC "Enable/Disable pre-processed hiprtc shared lib" ON)
 option(__HIP_USE_CMPXCHG_FOR_FP_ATOMICS "Enable/Disable FP Atomics version" OFF)
 option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" ON)
+set(HIPCC_BIN_DIR "" CACHE STRING "HIPCC and HIPCONFIG binary directories")
 
 if(__HIP_ENABLE_PCH)
   set(_pchStatus 1)
@@ -55,7 +62,8 @@ if(__HIP_USE_CMPXCHG_FOR_FP_ATOMICS)
   add_definitions(-D__HIP_USE_CMPXCHG_FOR_FP_ATOMICS)
 endif()
 
-message (STATUS "HIP_COMMON_DIR found at ${HIP_COMMON_DIR}" )
+message(STATUS "HIPCC_BIN_DIR found at ${HIPCC_BIN_DIR}")
+message(STATUS "HIP_COMMON_DIR found at ${HIP_COMMON_DIR}")
 set(HIP_COMMON_INCLUDE_DIR ${HIP_COMMON_DIR}/include)
 set(HIP_COMMON_BIN_DIR ${HIP_COMMON_DIR}/bin)
 set(__HIPCONFIG_EXECUTABLE__ ${HIP_COMMON_DIR}/bin/hipconfig)
@@ -322,20 +330,25 @@ install(FILES ${PROJECT_BINARY_DIR}/.hipInfo DESTINATION lib)
 # Install .hipVersion
 install(FILES ${PROJECT_BINARY_DIR}/.hipVersion DESTINATION bin)
 
-# Install hipcc binaries
-if(HIPCC_BIN_DIR)
-    install(FILES ${HIPCC_BIN_DIR}/hipcc.bin DESTINATION bin)
-    install(FILES ${HIPCC_BIN_DIR}/hipconfig.bin DESTINATION bin)
-endif()
-
 # Install src, bin, include & cmake if necessary
 execute_process(COMMAND test ${CMAKE_INSTALL_PREFIX} -ef ${CMAKE_CURRENT_SOURCE_DIR}
     RESULT_VARIABLE INSTALL_SOURCE)
 if(NOT ${INSTALL_SOURCE} EQUAL 0)
-    # Exclude .bat files on Linux.
     if(WIN32)
       install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS)
+      if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/" DESTINATION bin
+                FILES_MATCHING PATTERN "*.pdb"
+                               PATTERN "*.ilk"
+                               PATTERN "CMakeFiles" EXCLUDE
+                               PATTERN "hip_rtc_gen" EXCLUDE
+                               PATTERN "libelf" EXCLUDE
+                               PATTERN "loader" EXCLUDE
+                               PATTERN "pal" EXCLUDE
+                               PATTERN "libamdhsacode" EXCLUDE)
+      endif()
     else()
+      # Exclude .bat files on Linux.
       install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
               PATTERN *.bat EXCLUDE)
     endif()
@@ -384,123 +397,9 @@ install(
     ${CONFIG_PACKAGE_INSTALL_DIR}
     )
 # Packaging invokes UNIX commands, which are not available on Windows.
+
 if(NOT WIN32)
-#############################
-# Packaging steps
-#############################
-# Package: hip_devel
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip-devel)
-configure_file(packaging/hip-devel.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-configure_file(packaging/hip-devel.postinst ${BUILD_DIR}/postinst @ONLY)
-configure_file(packaging/hip-devel.prerm ${BUILD_DIR}/prerm @ONLY)
-
-add_custom_target(pkg_hip_base COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    COMMAND cp *.deb ${PROJECT_BINARY_DIR}
-    COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
-    COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
-    WORKING_DIRECTORY ${BUILD_DIR} )
-
-# Packaging needs to wait for hipify-clang to build if it's enabled...
-if (BUILD_HIPIFY_CLANG)
-    add_dependencies(pkg_hip_base hipify-clang)
-endif()
-
-if(HIP_RUNTIME STREQUAL "rocclr")
-    set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/rocclr)
-    configure_file(packaging/hip-runtime-amd.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-    configure_file(packaging/hip-runtime-amd.postinst ${BUILD_DIR}/postinst @ONLY)
-    configure_file(packaging/hip-runtime-amd.prerm ${BUILD_DIR}/prerm @ONLY)
-    add_custom_target(hip_on_rocclr COMMAND ${CMAKE_COMMAND} .
-        COMMAND rm -rf *.deb *.rpm *.tar.gz
-        COMMAND make package
-        COMMAND cp *.deb ${PROJECT_BINARY_DIR}
-        COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
-        COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
-        WORKING_DIRECTORY ${BUILD_DIR} )
-endif()
-
-# Package: hipcc (if HIPCC_BIN_DIR is available)
-message(STATUS "HIPCC_BIN_DIR found at ${HIPCC_BIN_DIR}" )
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hipcc)
-configure_file(packaging/hipcc.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-add_custom_target(pkg_hipcc COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    COMMAND cp *.deb ${PROJECT_BINARY_DIR}
-    COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
-    COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
-    WORKING_DIRECTORY ${BUILD_DIR})
-
-# Package: hip_runtime_nvidia
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip-runtime-nvidia)
-configure_file(packaging/hip-runtime-nvidia.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-configure_file(packaging/hip-runtime-nvidia.postinst ${BUILD_DIR}/postinst @ONLY)
-configure_file(packaging/hip-runtime-nvidia.prerm ${BUILD_DIR}/prerm @ONLY)
-add_custom_target(pkg_hip_nvcc COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    COMMAND cp *.deb ${PROJECT_BINARY_DIR}
-    COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
-    COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
-    WORKING_DIRECTORY ${BUILD_DIR})
-
-# Package: hip_doc
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip-doc)
-configure_file(packaging/hip-doc.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-add_custom_target(pkg_hip_doc  COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    COMMAND cp *.deb ${PROJECT_BINARY_DIR}
-    COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
-    COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
-    WORKING_DIRECTORY ${BUILD_DIR})
-
-# Package: hip_catch_tests
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip_catch_tests)
-configure_file(packaging/hip-tests.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-add_custom_target(pkg_hip_catch_tests COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    COMMAND cp *.deb ${PROJECT_BINARY_DIR}
-    COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
-    COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
-    WORKING_DIRECTORY ${BUILD_DIR})
-
-# Package: hip_samples
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/hip_samples)
-configure_file(packaging/hip-samples.txt ${BUILD_DIR}/CMakeLists.txt @ONLY)
-add_custom_target(pkg_hip_samples COMMAND ${CMAKE_COMMAND} .
-    COMMAND rm -rf *.deb *.rpm *.tar.gz
-    COMMAND make package
-    COMMAND cp *.deb ${PROJECT_BINARY_DIR}
-    COMMAND cp *.rpm ${PROJECT_BINARY_DIR}
-    COMMAND cp *.tar.gz ${PROJECT_BINARY_DIR}
-    WORKING_DIRECTORY ${BUILD_DIR})
-
-# Package: all
-if(POLICY CMP0037)
-    cmake_policy(PUSH)
-    cmake_policy(SET CMP0037 OLD)
-endif()
-
-if(HIP_RUNTIME STREQUAL "rocclr")
-    set(package_list pkg_hip_base hip_on_rocclr pkg_hip_nvcc pkg_hip_doc pkg_hip_samples)
-    if(HIPCC_BIN_DIR)
-      set(package_list ${package_list} pkg_hipcc)
-    endif()
-    if(HIP_CATCH_TEST EQUAL "1")
-      set(package_list ${package_list} pkg_hip_catch_tests)
-    endif()
-    add_custom_target(package
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-    DEPENDS ${package_list})
-endif()
-
-if(POLICY CMP0037)
-    cmake_policy(POP)
-endif()
+    add_subdirectory(packaging)
 endif()
 
 #############################
