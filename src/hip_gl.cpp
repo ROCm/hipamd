@@ -116,8 +116,8 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
     info.hCtx_ = glenv->glXGetCurrentContext_();
 #endif
     hip::getCurrentDevice()->asContext()->setInfo(info);
+    glenv->update(reinterpret_cast<intptr_t>(info.hCtx_));
   }
-
   *pHipDeviceCount = 0;
   switch (deviceList) {
     case hipGLDeviceListCurrentFrame:
@@ -234,6 +234,11 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   GLint miplevel = 0;
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
+
+  if (amdContext.glenv() == nullptr) {
+    LogError("invalid context, gl interop not initialized");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
 
   amd::GLFunctions::SetIntEnv ie(amdContext.glenv());
   if (!ie.isValid()) {
@@ -543,6 +548,11 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   GLint gliMapped = 0;
 
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
+
+  if (amdContext.glenv() == nullptr) {
+    LogError("invalid context, gl interop not initialized");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
 
   // Add this scope to bound the scoped lock
   {
