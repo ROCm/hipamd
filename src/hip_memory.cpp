@@ -518,7 +518,7 @@ hipError_t hipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   }
 
   if (flags & hipHostMallocNumaUser) {
-    ihipFlags |= CL_MEM_FOLLOW_USER_NUMA_POLICY;
+    ihipFlags |= CL_MEM_FOLLOW_USER_NUMA_POLICY | CL_MEM_SVM_ATOMICS;
   }
 
   HIP_RETURN_DURATION(ihipMalloc(ptr, sizeBytes, ihipFlags), *ptr);
@@ -978,7 +978,8 @@ hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) 
   HIP_INIT_API(hipHostRegister, hostPtr, sizeBytes, flags);
   CHECK_STREAM_CAPTURE_SUPPORTED();
   if(hostPtr != nullptr) {
-    amd::Memory* mem = new (*hip::host_device->asContext()) amd::Buffer(*hip::host_device->asContext(), CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS, sizeBytes);
+    amd::Memory* mem = new (*hip::host_device->asContext()) amd::Buffer(*hip::host_device->asContext(),
+                            CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS, sizeBytes);
 
     constexpr bool sysMemAlloc = false;
     constexpr bool skipAlloc = false;
@@ -2711,7 +2712,7 @@ hipError_t ihipPointerGetAttributes(void** data, int* attributes,
                 static_cast<char*>(memObj->getSvmPtr()) + offset;
             }
           } else {
-            *reinterpret_cast<char**>(data[idx]) = nullptr;
+            status = hipErrorInvalidValue;
           }
         } else { // Host Memory
           *reinterpret_cast<char**>(data[idx]) = static_cast<char*>(ptr);
@@ -2776,8 +2777,9 @@ hipError_t ihipPointerGetAttributes(void** data, int* attributes,
             *reinterpret_cast<hipDeviceptr_t*>(data[idx]) =
                  reinterpret_cast<char*>(devMem->virtualAddress());
           }
-        } else { // Host Memory
-          *reinterpret_cast<char**>(data[idx]) = static_cast<char*>(ptr);
+        } else {
+          // Input is host memory pointer, invalid for device.
+          status = hipErrorInvalidValue;
         }
         break;
       }
@@ -2801,8 +2803,8 @@ hipError_t ihipPointerGetAttributes(void** data, int* attributes,
       }
       case HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE : {
         // GPUDirect RDMA API is not yet supported, hence returning 0
-        LogPrintfWarning("attribute %d is not supported, defaults to 0", attributes[i]);
-        *reinterpret_cast<bool*>(data[idx]) = 0;
+        LogPrintfWarning("attribute %d is not supported.", attributes[i]);
+        status = hipErrorNotSupported;
         break;
       }
       case HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS : {
@@ -2815,8 +2817,8 @@ hipError_t ihipPointerGetAttributes(void** data, int* attributes,
       }
       case HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE : {
         // allocations from mempool are not yet supported, hence returning 0
-        LogPrintfWarning("attribute %d is not supported, defaults to 0", attributes[i]);
-        *reinterpret_cast<bool*>(data[idx]) = 0;
+        LogPrintfWarning("attribute %d is not supported.", attributes[i]);
+        status = hipErrorNotSupported;
         break;
       }
       default: {
