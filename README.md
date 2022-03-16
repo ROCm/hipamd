@@ -1,6 +1,11 @@
-## What is this repository for? ###
+## What is this repository for?
 
-This repository provides [HIP](https://github.com/ROCm-Developer-Tools/HIP) implementation specifically for AMD platform.
+This repository provides [HIP](https://github.com/ROCm-Developer-Tools/HIP) implementation specifically for AMD and NVIDIA platforms.
+
+## Install
+
+See [INSTALL.md](INSTALL.md)
+
 
 ## DISCLAIMER
 
