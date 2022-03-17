@@ -26,6 +26,13 @@
 #include <mutex>
 
 #if USE_PROF_API
+#include <GL/gl.h>
+#include <GL/glext.h>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <EGL/eglplatform.h>
+
 #include "hip/amd_detail/hip_prof_str.h"
 #include "platform/prof_protocol.h"
 
