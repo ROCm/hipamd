@@ -46,6 +46,13 @@ const char* GetGraphNodeTypeString(uint32_t op) {
 };
 
 int hipGraphNode::nextID = 0;
+std::unordered_set<hipGraphNode*> hipGraphNode::nodeSet_;
+amd::Monitor hipGraphNode::nodeSetLock_{"Guards global node set"};
+std::unordered_set<ihipGraph*> ihipGraph::graphSet_;
+amd::Monitor ihipGraph::graphSetLock_{"Guards global graph set"};
+std::unordered_set<hipGraphExec*> hipGraphExec::graphExecSet_;
+amd::Monitor hipGraphExec::graphExecSetLock_{"Guards global exec graph set"};
+
 hipError_t hipGraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t count,
                                                 hipMemcpyKind kind) {
   hipError_t status = ihipMemcpy_validate(dst, src, count, kind);
@@ -62,12 +69,18 @@ hipError_t hipGraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size
   size_t dOffset = 0;
   amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
 
-  if ((srcMemory == nullptr) && (dstMemory != nullptr)) {
+  if ((srcMemory == nullptr) && (dstMemory != nullptr)) { //host to device
     if (origDstMemory->getContext().devices()[0] != dstMemory->getContext().devices()[0]) {
       return hipErrorInvalidValue;
     }
-  } else if ((srcMemory != nullptr) && (dstMemory == nullptr)) {
+    if (kind != hipMemcpyHostToDevice) {
+      return hipErrorInvalidValue;
+    }
+  } else if ((srcMemory != nullptr) && (dstMemory == nullptr)) { //device to host
     if (origSrcMemory->getContext().devices()[0] != srcMemory->getContext().devices()[0]) {
+      return hipErrorInvalidValue;
+    }
+    if (kind != hipMemcpyDeviceToHost) {
       return hipErrorInvalidValue;
     }
   } else if ((srcMemory != nullptr) && (dstMemory != nullptr)) {
@@ -458,6 +471,16 @@ hipError_t hipGraphMemcpyNode::SetCommandParams(const hipMemcpy3DParms* pNodePar
   return hipSuccess;
 }
 
+
+bool ihipGraph::isGraphValid(ihipGraph* pGraph) {
+  amd::ScopedLock lock(graphSetLock_);
+  if (graphSet_.find(pGraph) == graphSet_.end()) {
+    return false;
+  }
+  return true;
+}
+
+
 void ihipGraph::AddNode(const Node& node) {
   vertices_.emplace_back(node);
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Add %s(%p)\n",
@@ -608,7 +631,15 @@ void ihipGraph::LevelOrder(std::vector<Node>& levelOrder) {
   }
 }
 
-ihipGraph* ihipGraph::clone(std::unordered_map<Node, Node>& clonedNodes) const {
+const ihipGraph* ihipGraph::getOriginalGraph() const {
+  return pOriginalGraph_;
+}
+
+void ihipGraph::setOriginalGraph(const ihipGraph* pOriginalGraph) {
+  pOriginalGraph_ = pOriginalGraph;
+}
+
+ihipGraph* ihipGraph::clone(std::unordered_map<Node, Node>& clonedNodes) const{
   ihipGraph* newGraph = new ihipGraph();
   for (auto entry : vertices_) {
     hipGraphNode* node = entry->clone();
@@ -634,12 +665,21 @@ ihipGraph* ihipGraph::clone(std::unordered_map<Node, Node>& clonedNodes) const {
     }
     clonedNodes[node]->SetDependencies(clonedDependencies);
   }
+  newGraph->setOriginalGraph(this);
   return newGraph;
 }
 
-ihipGraph* ihipGraph::clone() const {
+ihipGraph* ihipGraph::clone() const{
   std::unordered_map<Node, Node> clonedNodes;
   return clone(clonedNodes);
+}
+
+bool hipGraphExec::isGraphExecValid(hipGraphExec* pGraphExec) {
+  amd::ScopedLock lock(graphExecSetLock_);
+  if (graphExecSet_.find(pGraphExec) == graphExecSet_.end()) {
+    return false;
+  }
+  return true;
 }
 
 hipError_t hipGraphExec::CreateQueues(size_t numQueues) {

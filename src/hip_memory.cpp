@@ -510,15 +510,15 @@ hipError_t hipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  unsigned int ihipFlags = CL_MEM_SVM_FINE_GRAIN_BUFFER | (flags << 16);
-  if (flags == 0 ||
-      flags & (hipHostMallocCoherent | hipHostMallocMapped) ||
-     (!(flags & hipHostMallocNonCoherent) && HIP_HOST_COHERENT)) {
-    ihipFlags |= CL_MEM_SVM_ATOMICS;
-  }
+  // Always choose finegrain memory for hipHostMalloc
+  unsigned int ihipFlags = CL_MEM_SVM_ATOMICS | CL_MEM_SVM_FINE_GRAIN_BUFFER | (flags << 16);
 
   if (flags & hipHostMallocNumaUser) {
-    ihipFlags |= CL_MEM_FOLLOW_USER_NUMA_POLICY | CL_MEM_SVM_ATOMICS;
+    ihipFlags |= CL_MEM_FOLLOW_USER_NUMA_POLICY;
+  }
+
+  if (flags & hipHostMallocNonCoherent) {
+    ihipFlags &= ~CL_MEM_SVM_ATOMICS;
   }
 
   HIP_RETURN_DURATION(ihipMalloc(ptr, sizeBytes, ihipFlags), *ptr);
@@ -977,7 +977,9 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
   HIP_INIT_API(hipHostRegister, hostPtr, sizeBytes, flags);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  if(hostPtr != nullptr) {
+  if (hostPtr == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  } else {
     amd::Memory* mem = new (*hip::host_device->asContext()) amd::Buffer(*hip::host_device->asContext(),
                             CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS, sizeBytes);
 
@@ -990,11 +992,14 @@ hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) 
       HIP_RETURN(hipErrorOutOfMemory);
     }
 
-    for (const auto& device: hip::getCurrentDevice()->devices()) {
+    for (const auto& device : g_devices) {
       // Since the amd::Memory object is shared between all devices
       // it's fine to have multiple addresses mapped to it
-      const device::Memory* devMem = mem->getDeviceMemory(*device);
-      amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(devMem->virtualAddress()), mem);
+      const device::Memory* devMem = mem->getDeviceMemory(*device->devices()[0]);
+      void* vAddr = reinterpret_cast<void*>(devMem->virtualAddress());
+      if (amd::MemObjMap::FindMemObj(vAddr) == nullptr) {
+        amd::MemObjMap::AddMemObj(vAddr, mem);
+      }
     }
 
     amd::MemObjMap::AddMemObj(hostPtr, mem);
@@ -1002,8 +1007,6 @@ hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) 
       mem->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
     }
     HIP_RETURN(hipSuccess);
-  } else {
-    HIP_RETURN_DURATION(ihipMalloc(&hostPtr, sizeBytes, flags), hostPtr);
   }
 }
 
@@ -2168,11 +2171,16 @@ hipError_t hipMemcpyAtoH(void* dstHost,
 }
 
 hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
-  // The struct passed to hipMemcpy3D() must specify one of srcArray or srcPtr and one of dstArray
-  // or dstPtr. Passing more than one non-zero source or destination will cause hipMemcpy3D() to
+  // Passing more than one non-zero source or destination will cause hipMemcpy3D() to
   // return an error.
   if (p == nullptr || ((p->srcArray != nullptr) && (p->srcPtr.ptr != nullptr)) ||
       ((p->dstArray != nullptr) && (p->dstPtr.ptr != nullptr))) {
+    return hipErrorInvalidValue;
+  }
+  // The struct passed to hipMemcpy3D() must specify one of srcArray or srcPtr and one of dstArray
+  // or dstPtr.
+  if (((p->srcArray == nullptr) && (p->srcPtr.ptr == nullptr)) ||
+      ((p->dstArray == nullptr) && (p->dstPtr.ptr == nullptr))) {
     return hipErrorInvalidValue;
   }
 

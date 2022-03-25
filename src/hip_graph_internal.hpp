@@ -41,6 +41,7 @@ hipError_t FillCommands(std::vector<std::vector<Node>>& parallelLists,
                         amd::Command*& endCommand, amd::HostQueue* queue);
 void UpdateQueue(std::vector<std::vector<Node>>& parallelLists, amd::HostQueue*& queue,
                  hipGraphExec* ptr);
+
 struct hipGraphNode {
  protected:
   amd::HostQueue* queue_;
@@ -57,6 +58,8 @@ struct hipGraphNode {
   size_t outDegree_;
   static int nextID;
   struct ihipGraph* parentGraph_;
+  static std::unordered_set<hipGraphNode*> nodeSet_;
+  static amd::Monitor nodeSetLock_;
 
  public:
   hipGraphNode(hipGraphNodeType type)
@@ -66,7 +69,10 @@ struct hipGraphNode {
         inDegree_(0),
         outDegree_(0),
         id_(nextID++),
-        parentGraph_(nullptr) {}
+        parentGraph_(nullptr) {
+    amd::ScopedLock lock(nodeSetLock_);
+    nodeSet_.insert(this);
+  }
   /// Copy Constructor
   hipGraphNode(const hipGraphNode& node) {
     level_ = node.level_;
@@ -76,6 +82,8 @@ struct hipGraphNode {
     visited_ = false;
     id_ = node.id_;
     parentGraph_ = nullptr;
+    amd::ScopedLock lock(nodeSetLock_);
+    nodeSet_.insert(this);
   }
 
   virtual ~hipGraphNode() {
@@ -85,6 +93,17 @@ struct hipGraphNode {
     for (auto node : dependencies_) {
       node->RemoveEdge(this);
     }
+    amd::ScopedLock lock(nodeSetLock_);
+    nodeSet_.erase(this);
+  }
+
+  // check node validity
+  static bool isNodeValid(hipGraphNode* pGraphNode) {
+    amd::ScopedLock lock(nodeSetLock_);
+    if (nodeSet_.find(pGraphNode) == nodeSet_.end()) {
+      return false;
+    }
+    return true;
   }
 
   amd::HostQueue* GetQueue() { return queue_; }
@@ -211,14 +230,27 @@ struct hipGraphNode {
 
 struct ihipGraph {
   std::vector<Node> vertices_;
+  const ihipGraph* pOriginalGraph_ = nullptr;
+  static std::unordered_set<ihipGraph*> graphSet_;
+  static amd::Monitor graphSetLock_ ;
 
  public:
-  ihipGraph() {}
+  ihipGraph() {
+    amd::ScopedLock lock(graphSetLock_);
+    graphSet_.insert(this);
+  };
+
   ~ihipGraph() {
     for (auto node : vertices_) {
       delete node;
     }
-  }
+    amd::ScopedLock lock(graphSetLock_);
+    graphSet_.erase(this);
+  };
+
+  // check graphs validity
+  static bool isGraphValid(ihipGraph* pGraph);
+
   /// add node to the graph
   void AddNode(const Node& node);
   void RemoveNode(const Node& node);
@@ -234,6 +266,11 @@ struct ihipGraph {
   const std::vector<Node>& GetNodes() const { return vertices_; }
   /// returns all the edges in the graph
   std::vector<std::pair<Node, Node>> GetEdges() const;
+  // returns the original graph ptr if cloned
+  const ihipGraph* getOriginalGraph() const;
+  // saves the original graph ptr if cloned
+  void setOriginalGraph(const ihipGraph* pOriginalGraph);
+
   void GetRunListUtil(Node v, std::unordered_map<Node, bool>& visited,
                       std::vector<Node>& singleList, std::vector<std::vector<Node>>& parallelLists,
                       std::unordered_map<Node, std::vector<Node>>& dependencies);
@@ -253,6 +290,8 @@ struct hipGraphExec {
   uint currentQueueIndex_;
   std::unordered_map<Node, Node> clonedNodes_;
   amd::Command* lastEnqueuedCommand_;
+  static std::unordered_set<hipGraphExec*> graphExecSet_;
+  static amd::Monitor graphExecSetLock_ ;
 
  public:
   hipGraphExec(std::vector<Node>& levelOrder, std::vector<std::vector<Node>>& lists,
@@ -263,7 +302,10 @@ struct hipGraphExec {
         nodeWaitLists_(nodeWaitLists),
         clonedNodes_(clonedNodes),
         lastEnqueuedCommand_(nullptr),
-        currentQueueIndex_(0) {}
+        currentQueueIndex_(0) {
+    amd::ScopedLock lock(graphExecSetLock_);
+    graphExecSet_.insert(this);
+        }
 
   ~hipGraphExec() {
     // new commands are launched for every launch they are destroyed as and when command is
@@ -272,6 +314,8 @@ struct hipGraphExec {
       queue->release();
     }
     for (auto it = clonedNodes_.begin(); it != clonedNodes_.end(); it++) delete it->second;
+    amd::ScopedLock lock(graphExecSetLock_);
+    graphExecSet_.erase(this);
   }
 
   Node GetClonedNode(Node node) {
@@ -283,6 +327,9 @@ struct hipGraphExec {
     }
     return clonedNode;
   }
+
+  // check executable graphs validity
+  static bool isGraphExecValid(hipGraphExec* pGraphExec);
 
   std::vector<Node>& GetNodes() { return levelOrder_; }
 
@@ -407,6 +454,16 @@ class hipGraphKernelNode : public hipGraphNode {
   hipFunction_t func_;
 
  public:
+  static hipError_t getFunc(hipFunction_t* func, const hipKernelNodeParams& params, unsigned int device) {
+    hipError_t status = PlatformState::instance().getStatFunc(func, params.func, device);
+    if (status != hipSuccess) {
+      *func = reinterpret_cast<hipFunction_t>(params.func);
+    }
+    if (*func == nullptr) {
+      return hipErrorInvalidDeviceFunction;
+    }
+    return hipSuccess;
+  }
   hipGraphKernelNode(const hipKernelNodeParams* pNodeParams, const hipFunction_t func)
       : hipGraphNode(hipGraphNodeTypeKernel) {
     pKernelParams_ = new hipKernelNodeParams(*pNodeParams);
@@ -448,9 +505,8 @@ class hipGraphKernelNode : public hipGraphNode {
     }
     if (params->func != pKernelParams_->func) {
       hipFunction_t func = nullptr;
-      hipError_t status =
-          PlatformState::instance().getStatFunc(&func, params->func, ihipGetDevice());
-      if ((status != hipSuccess) || (func == nullptr)) {
+      hipError_t status = hipGraphKernelNode::getFunc(&func, *params, ihipGetDevice());
+      if (status != hipSuccess) {
         return hipErrorInvalidDeviceFunction;
       }
       func_ = func;
@@ -462,9 +518,8 @@ class hipGraphKernelNode : public hipGraphNode {
   hipError_t SetCommandParams(const hipKernelNodeParams* params) {
     if (params->func != pKernelParams_->func) {
       hipFunction_t func = nullptr;
-      hipError_t status =
-          PlatformState::instance().getStatFunc(&func, params->func, ihipGetDevice());
-      if ((status != hipSuccess) || (func == nullptr)) {
+      hipError_t status = hipGraphKernelNode::getFunc(&func, *params, ihipGetDevice());
+      if (status != hipSuccess) {
         return hipErrorInvalidDeviceFunction;
       }
       func_ = func;
