@@ -231,6 +231,7 @@ endif()
 message(STATUS "HIP Runtime: " ${HIP_RUNTIME})
 message(STATUS "HIP Compiler: " ${HIP_COMPILER})
 
+add_to_config(_buildInfo HIP_PLATFORM)
 add_to_config(_buildInfo HIP_RUNTIME)
 add_to_config(_buildInfo HIP_COMPILER)
 
