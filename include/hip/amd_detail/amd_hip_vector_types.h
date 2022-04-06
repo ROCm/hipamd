@@ -431,15 +431,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         ~HIP_vector_base() = default;
 
         __HOST_DEVICE__
-        HIP_vector_base& operator=(const HIP_vector_base& x_) noexcept {
-            #if __has_attribute(ext_vector_type)
-                data = x_.data;
-            #else
-                data[0] = x_.data[0];
-            #endif
-
-            return *this;
-        }
+        HIP_vector_base& operator=(const HIP_vector_base&) = default;
     };
 
     template<typename T>
@@ -484,16 +476,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         ~HIP_vector_base() = default;
 
         __HOST_DEVICE__
-        HIP_vector_base& operator=(const HIP_vector_base& x_) noexcept {
-            #if __has_attribute(ext_vector_type)
-                data = x_.data;
-            #else
-                data[0] = x_.data[0];
-                data[1] = x_.data[1];
-            #endif
-
-            return *this;
-        }
+        HIP_vector_base& operator=(const HIP_vector_base&) = default;
     };
 
     template<typename T>
@@ -721,18 +704,7 @@ template <typename __T> struct is_scalar : public integral_constant<bool, __is_s
         ~HIP_vector_base() = default;
 
         __HOST_DEVICE__
-        HIP_vector_base& operator=(const HIP_vector_base& x_) noexcept {
-            #if __has_attribute(ext_vector_type)
-                data = x_.data;
-            #else
-                data[0] = x_.data[0];
-                data[1] = x_.data[1];
-                data[2] = x_.data[2];
-                data[3] = x_.data[3];
-            #endif
-
-            return *this;
-        }
+        HIP_vector_base& operator=(const HIP_vector_base&) = default;
     };
 
     template<typename T, unsigned int rank>
