@@ -53,14 +53,12 @@ typedef struct ihipIpcEventShmem_s {
 
 class EventMarker : public amd::Marker {
  public:
-  EventMarker(amd::HostQueue& queue, bool disableFlush, bool markerTs = false,
-              int32_t scope = amd::Device::kCacheStateInvalid)
+  EventMarker(amd::HostQueue& queue, bool disableFlush, uint32_t markerTs = 0)
       : amd::Marker(queue, disableFlush) {
     profilingInfo_.enabled_ = true;
     profilingInfo_.callback_ = nullptr;
     profilingInfo_.marker_ts_ = markerTs;
     profilingInfo_.clear();
-    setEventScope(scope);
   }
 };
 
