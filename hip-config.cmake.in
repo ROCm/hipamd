@@ -108,7 +108,8 @@ if(WIN32)
   elseif(DEFINED ENV{HIP_DIR})
     file(TO_CMAKE_PATH "$ENV{HIP_DIR}" HIP_DIR)
   else()
-    set(HIP_PATH "C:/Program Files/AMD HIP SDK/hip")
+    # using the HIP found
+    set(HIP_PATH ${PACKAGE_PREFIX_DIR})
   endif()
 else()
   # Linux - set a default path for ROCM_PATH
@@ -191,6 +192,8 @@ if(NOT WIN32)
   #if HSA is not under ROCm then provide CMAKE_PREFIX_PATH=<HSA_PATH>
   find_path(HSA_HEADER hsa/hsa.h
     PATHS
+      "${_IMPORT_PREFIX}/include"
+      #FILE_REORG_BACKWARD_COMPATIBILITY ${_IMPORT_PREFIX}/../include is for Backward compatibility
       "${_IMPORT_PREFIX}/../include"
       ${ROCM_PATH}/include
   )
@@ -216,8 +219,8 @@ if(HIP_RUNTIME MATCHES "rocclr")
 
   if(NOT WIN32)
     set_target_properties(hip::device PROPERTIES
-      INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/../include"
-      INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/../include"
+      INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
+      INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
     )
   endif()
 endif()

@@ -112,6 +112,8 @@ target_sources(amdhip64 PRIVATE
   hip_hmm.cpp
   hip_intercept.cpp
   hip_memory.cpp
+  hip_mempool.cpp
+  hip_mempool_impl.cpp
   hip_module.cpp
   hip_peer.cpp
   hip_platform.cpp
@@ -120,13 +122,15 @@ target_sources(amdhip64 PRIVATE
   hip_stream.cpp
   hip_surface.cpp
   hip_texture.cpp
-  hip_gl.cpp)
+  hip_gl.cpp
+  hip_vm.cpp)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE
     cl_d3d9.cpp
     cl_d3d10.cpp
-    cl_d3d11.cpp)
+    cl_d3d11.cpp
+    hip_runtime.cpp)
 endif()
 
 if(BUILD_SHARED_LIBS)
