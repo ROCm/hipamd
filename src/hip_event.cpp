@@ -39,16 +39,6 @@ bool Event::ready() {
   return ready;
 }
 
-bool EventDD::ready() {
-  // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
-  bool ready = g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_);
-  // FIXME: Remove status check entirely
-  if (!ready) {
-    ready = (event_->status() == CL_COMPLETE);
-  }
-  return ready;
-}
-
 hipError_t Event::query() {
   amd::ScopedLock lock(lock_);
 
@@ -77,18 +67,10 @@ hipError_t Event::synchronize() {
   return hipSuccess;
 }
 
-bool Event::awaitEventCompletion() {
-  return event_->awaitCompletion();
-}
-
-bool EventDD::awaitEventCompletion() {
-  return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, true);
-}
-
 hipError_t Event::elapsedTime(Event& eStop, float& ms) {
   amd::ScopedLock startLock(lock_);
+
   if (this == &eStop) {
-    ms = 0.f;
     if (event_ == nullptr) {
       return hipErrorInvalidHandle;
     }
@@ -101,11 +83,12 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
       return hipErrorNotReady;
     }
 
+    ms = 0.f;
     return hipSuccess;
   }
-  amd::ScopedLock stopLock(eStop.lock());
+  amd::ScopedLock stopLock(eStop.lock_);
 
-  if (event_ == nullptr || eStop.event() == nullptr) {
+  if (event_ == nullptr || eStop.event_ == nullptr) {
     return hipErrorInvalidHandle;
   }
 
@@ -117,7 +100,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     return hipErrorNotReady;
   }
 
-  if (event_ == eStop.event_ && recorded_ && eStop.isRecorded()) {
+  if (event_ == eStop.event_ && recorded_ && eStop.recorded_) {
     // Events are the same, which indicates the stream is empty and likely
     // eventRecord is called on another stream. For such cases insert and measure a
     // marker.
@@ -130,8 +113,8 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
   } else {
     // Note: with direct dispatch eStop.ready() relies on HW event, but CPU status can be delayed.
     // Hence for now make sure CPU status is updated by calling awaitCompletion();
-    awaitEventCompletion();
-    eStop.awaitEventCompletion();
+    event_->awaitCompletion();
+    eStop.event_->awaitCompletion();
     ms = static_cast<float>(eStop.time() - time()) / 1000000.f;
   }
   return hipSuccess;
@@ -143,21 +126,6 @@ int64_t Event::time() const {
     return static_cast<int64_t>(event_->profilingInfo().end_);
   } else {
     return static_cast<int64_t>(event_->profilingInfo().start_);
-  }
-}
-
-int64_t EventDD::time() const {
-  uint64_t start = 0, end = 0;
-  assert(event_ != nullptr);
-  g_devices[deviceId()]->devices()[0]->getHwEventTime(*event_, &start, &end);
-  // FIXME: This is only needed if the command had to wait CL_COMPLETE status
-  if (start == 0 || end == 0) {
-    return Event::time();
-  }
-  if (recorded_) {
-    return static_cast<int64_t>(end);
-  } else {
-    return static_cast<int64_t>(start);
   }
 }
 
@@ -254,11 +222,7 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
     if (flags & hipEventInterprocess) {
       e = new hip::IPCEvent();
     } else {
-      if (AMD_DIRECT_DISPATCH) {
-        e = new hip::EventDD(flags);
-      } else {
-        e = new hip::Event(flags);
-      }
+      e = new hip::Event(flags);
     }
     if (e == nullptr) {
       return hipErrorOutOfMemory;
