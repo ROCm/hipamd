@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -18,23 +18,43 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#include "vdi_common.hpp"
-#ifdef _WIN32
+#include "thread/thread.hpp"
+
 #include <windows.h>
-#include <d3d9.h>
-#include <d3d10_1.h>
-#include <CL/cl_d3d10.h>
-#include <CL/cl_d3d11.h>
-#include <CL/cl_dx9_media_sharing.h>
-#endif
-#include <CL/cl_icd.h>
+#include <iostream>
 
-cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {0};
-amd::PlatformIDS amd::PlatformID::Platform = {amd::ICDDispatchedObject::icdVendorDispatch_};
+void ihipDestroyDevice();
 
-RUNTIME_ENTRY(cl_int, clGetDeviceIDs,
-              (cl_platform_id platform, cl_device_type device_type, cl_uint num_entries,
-               cl_device_id* devices, cl_uint* num_devices)) {
-  return CL_SUCCESS;
+#ifdef DEBUG
+static int reportHook(int reportType, char* message, int* returnValue) {
+  if (returnValue) {
+    *returnValue = 1;
+  }
+  std::cerr << message;
+  ::exit(3);
+  return TRUE;
 }
-RUNTIME_EXIT
+#endif  // DEBUG
+
+extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved) {
+  switch (reason) {
+    case DLL_PROCESS_ATTACH:
+#ifdef DEBUG
+      if (!::getenv("AMD_OCL_ENABLE_MESSAGE_BOX")) {
+        _CrtSetReportHook(reportHook);
+        _set_error_mode(_OUT_TO_STDERR);
+      }
+#endif  // DEBUG
+      break;
+    case DLL_PROCESS_DETACH:
+      ihipDestroyDevice();
+      break;
+    case DLL_THREAD_DETACH: {
+      amd::Thread* thread = amd::Thread::current();
+      delete thread;
+    } break;
+    default:
+      break;
+  }
+  return true;
+}

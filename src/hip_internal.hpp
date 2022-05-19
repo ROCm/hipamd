@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -108,8 +108,10 @@ static  amd::Monitor g_hipInitlock{"hipInit lock"};
   ClPrint(amd::LOG_INFO, amd::LOG_API, "%s: Returned %s : %s",                     \
           __func__, ihipGetErrorName(err), ToString( __VA_ARGS__ ).c_str());
 
-#define HIP_INIT_API_NO_RETURN(cid, ...)		     \
-  HIP_API_PRINT(__VA_ARGS__)                                 \
+  #define HIP_INIT_API_NO_RETURN(cid, ...)                  \
+  HIP_API_PRINT(__VA_ARGS__)                                \
+  amd::Thread* thread = amd::Thread::current();             \
+  VDI_CHECK_THREAD(thread);                                 \
   HIP_INIT_VOID()
 
 // This macro should be called at the beginning of every HIP API.
@@ -153,19 +155,25 @@ static  amd::Monitor g_hipInitlock{"hipInit lock"};
     }                                    \
   } while (0);
 
-extern thread_local std::vector<hipStream_t> g_captureStreams;
-
 #define CHECK_STREAM_CAPTURE_SUPPORTED()                                                           \
-  for (auto stream : g_captureStreams) {                                                           \
-    if (reinterpret_cast<hip::Stream*>(stream)->GetCaptureMode() != hipStreamCaptureModeRelaxed) { \
+  if (l_streamCaptureMode == hipStreamCaptureModeThreadLocal) {                                    \
+    if (l_captureStreams.size() != 0) {                                                            \
       HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
+    }                                                                                              \
+  } else if (l_streamCaptureMode == hipStreamCaptureModeGlobal) {                                  \
+    if (l_captureStreams.size() != 0) {                                                            \
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
+    }                                                                                              \
+    amd::ScopedLock lock(g_captureStreamsLock);                                                    \
+    if (g_captureStreams.size() != 0) {                                                            \
+        HIP_RETURN(hipErrorStreamCaptureUnsupported);                                              \
     }                                                                                              \
   }
 
 // Sync APIs cannot be called when stream capture is active
 #define CHECK_STREAM_CAPTURING()                                                                   \
   if (!g_captureStreams.empty()) {                                                                 \
-    HIP_RETURN(hipErrorStreamCaptureImplicit);                                                     \
+    return hipErrorStreamCaptureImplicit;                                                     \
   }
 
 #define STREAM_CAPTURE(name, stream, ...)                                                          \
@@ -174,7 +182,7 @@ extern thread_local std::vector<hipStream_t> g_captureStreams;
       reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus() ==                                \
           hipStreamCaptureStatusActive) {                                                          \
     hipError_t status = capture##name(stream, ##__VA_ARGS__);                                      \
-    HIP_RETURN(status);                                                                            \
+    return status;                                                                            \
   }
 
 #define EVENT_CAPTURE(name, event, ...)                                                            \
@@ -183,12 +191,18 @@ extern thread_local std::vector<hipStream_t> g_captureStreams;
     HIP_RETURN(status);                                                                            \
   }
 
+#define PER_THREAD_DEFAULT_STREAM(stream)                                                         \
+  if (stream == nullptr) {                                                                        \
+    stream = getPerThreadDefaultStream();                                                         \
+  }
+
 namespace hc {
 class accelerator;
 class accelerator_view;
 };
 namespace hip {
   class Device;
+  class MemoryPool;
   class Stream {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -210,7 +224,7 @@ namespace hip {
     hipGraph_t pCaptureGraph_;
     /// Based on mode stream capture places restrictions on API calls that can be made within or
     /// concurrently
-    hipStreamCaptureMode captureMode_;
+    hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal};
     bool originStream_;
     /// Origin sream has no parent. Parent stream for the derived captured streams with event
     /// dependencies
@@ -238,6 +252,8 @@ namespace hip {
     void Finish() const;
     /// Get device ID associated with the current stream;
     int DeviceId() const;
+    /// Get HIP device associated with the stream
+    Device* GetDevice() const { return device_; }
     /// Get device ID associated with a stream;
     static int DeviceId(const hipStream_t hStream);
     /// Returns if stream is null stream
@@ -252,7 +268,7 @@ namespace hip {
     const std::vector<uint32_t> GetCUMask() const { return cuMask_; }
 
     /// Sync all non-blocking streams
-    static void syncNonBlockingStreams(int deviceId = -1);
+    static void syncNonBlockingStreams(int deviceId);
 
     /// Destroy all streams on a given device
     static void destroyAllStreams(int deviceId);
@@ -267,7 +283,7 @@ namespace hip {
     /// Returns captured graph
     hipGraph_t GetCaptureGraph() const { return pCaptureGraph_; }
     /// Returns last captured graph node
-    std::vector<hipGraphNode_t> GetLastCapturedNodes() const { return lastCapturedNodes_; }
+    const std::vector<hipGraphNode_t>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
     /// Set last captured graph node
     void SetLastCapturedNode(hipGraphNode_t graphNode) {
       lastCapturedNodes_.clear();
@@ -338,15 +354,23 @@ namespace hip {
 
     std::vector<amd::HostQueue*> queues_;
 
+    MemoryPool* default_mem_pool_;
+    MemoryPool* current_mem_pool_;
+
+    std::set<MemoryPool*> mem_pools_;
+
   public:
     Device(amd::Context* ctx, int devId): context_(ctx),
-         deviceId_(devId),
-         null_stream_(this, Stream::Priority::Normal, 0, true),
+        deviceId_(devId),
+        null_stream_(this, Stream::Priority::Normal, 0, true),
          flags_(hipDeviceScheduleSpin),
-         isActive_(false)
+        isActive_(false),
+        default_mem_pool_(nullptr),
+        current_mem_pool_(nullptr)
         { assert(ctx != nullptr); }
-    ~Device() {}
+    ~Device();
 
+    bool Create();
     amd::Context* asContext() const { return context_; }
     int deviceId() const { return deviceId_; }
     void retain() const { context_->retain(); }
@@ -374,6 +398,7 @@ namespace hip {
     unsigned int getFlags() const { return flags_; }
     void setFlags(unsigned int flags) { flags_ = flags; }
     amd::HostQueue* NullStream(bool skip_alloc = false);
+    Stream* GetNullStream();
 
     void SaveQueue(amd::HostQueue* queue) {
       amd::ScopedLock lock(lock_);
@@ -391,6 +416,32 @@ namespace hip {
       }
       return false;
     }
+
+    /// Set the current memory pool on the device
+    void SetCurrentMemoryPool(MemoryPool* pool = nullptr) {
+      current_mem_pool_ = (pool == nullptr) ? default_mem_pool_ : pool;
+    }
+
+    /// Get the current memory pool on the device
+    MemoryPool* GetCurrentMemoryPool() const { return current_mem_pool_; }
+
+    /// Get the default memory pool on the device
+    MemoryPool* GetDefaultMemoryPool() const { return default_mem_pool_; }
+
+    /// Add memory pool to the device
+    void AddMemoryPool(MemoryPool* pool);
+
+    /// Remove memory pool from the device
+    void RemoveMemoryPool(MemoryPool* pool);
+
+    /// Free memory from the device
+    bool FreeMemory(amd::Memory* memory, Stream* stream);
+
+    /// Release freed memory from all pools on the current device
+    void ReleaseFreedMemory(Stream* stream);
+
+    /// Removes a destroyed stream from the safe list of memory pools
+    void RemoveStreamFromPools(Stream* stream);
   };
 
   /// Current thread's device
@@ -437,18 +488,27 @@ extern hipError_t ihipDeviceGetCount(int* count);
 extern int ihipGetDevice();
 
 extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
-extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset);
+extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size = 0);
 extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size);
 extern void getStreamPerThread(hipStream_t& stream);
+extern hipStream_t getPerThreadDefaultStream();
 extern hipError_t ihipUnbindTexture(textureReference* texRef);
-
+extern hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
+extern hipError_t ihipHostUnregister(void* hostPtr);
 extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
 
 extern hipError_t ihipDeviceGet(hipDevice_t* device, int deviceId);
+extern hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void* ptr,
+                                      uint64_t value, uint64_t mask, unsigned int flags, size_t sizeBytes);
 
 constexpr bool kOptionChangeable = true;
 constexpr bool kNewDevProg = false;
 
 constexpr bool kMarkerDisableFlush = true;   //!< Avoids command batch flush in ROCclr
+
+extern std::vector<hip::Stream*> g_captureStreams;
+extern amd::Monitor g_captureStreamsLock;
+extern thread_local std::vector<hip::Stream*> l_captureStreams;
+extern thread_local hipStreamCaptureMode l_streamCaptureMode;
 
 #endif // HIP_SRC_HIP_INTERNAL_H

@@ -48,17 +48,19 @@ typedef struct ihipIpcEventShmem_s {
   std::atomic<int> owners_process_id;
   std::atomic<int> read_index;
   std::atomic<int> write_index;
-  std::atomic<int> signal[IPC_SIGNALS_PER_EVENT];
+  uint32_t signal[IPC_SIGNALS_PER_EVENT];
 } ihipIpcEventShmem_t;
 
 class EventMarker : public amd::Marker {
  public:
-  EventMarker(amd::HostQueue& queue, bool disableFlush, bool markerTs = false)
+  EventMarker(amd::HostQueue& queue, bool disableFlush, bool markerTs = false,
+              int32_t scope = amd::Device::kCacheStateInvalid)
       : amd::Marker(queue, disableFlush) {
     profilingInfo_.enabled_ = true;
     profilingInfo_.callback_ = nullptr;
     profilingInfo_.marker_ts_ = markerTs;
     profilingInfo_.clear();
+    setEventScope(scope);
   }
 };
 
@@ -93,7 +95,8 @@ class Event {
   virtual hipError_t enqueueStreamWaitCommand(hipStream_t stream, amd::Command* command);
   virtual hipError_t streamWait(hipStream_t stream, uint flags);
 
-  virtual hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue);
+  virtual hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue,
+                                   uint32_t flags = 0);
   virtual hipError_t enqueueRecordCommand(hipStream_t stream, amd::Command* command, bool record);
   hipError_t addMarker(hipStream_t stream, amd::Command* command, bool record);
 
@@ -111,6 +114,7 @@ class Event {
   amd::Monitor& lock() { return lock_; }
   const int deviceId() const { return device_id_; }
   void setDeviceId(int id) { device_id_ = id; }
+  amd::Event* event() { return event_; }
 
   /// End capture on this event
   void EndCapture() {
@@ -140,6 +144,9 @@ class Event {
   virtual hipError_t OpenHandle(ihipIpcEventHandle_t* handle) {
     return hipErrorInvalidConfiguration;
   }
+  virtual bool awaitEventCompletion();
+  virtual bool ready();
+  virtual int64_t time() const;
 
  protected:
   amd::Monitor lock_;
@@ -150,9 +157,16 @@ class Event {
   //! hip*ModuleLaunchKernel API which takes start and stop events so no
   //! hipEventRecord is called. Cleanup needed once those APIs are deprecated.
   bool recorded_;
+};
 
-  bool ready();
-  int64_t time() const;
+class EventDD : public Event {
+ public:
+  EventDD(unsigned int flags) : Event(flags) {}
+  virtual ~EventDD() {}
+
+  virtual bool awaitEventCompletion();
+  virtual bool ready();
+  virtual int64_t time() const;
 };
 
 class IPCEvent : public Event {
@@ -172,6 +186,7 @@ class IPCEvent : public Event {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
       hipError_t status = synchronize();
+      status  = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
       }
@@ -188,7 +203,7 @@ class IPCEvent : public Event {
   hipError_t enqueueStreamWaitCommand(hipStream_t stream, amd::Command* command);
   hipError_t streamWait(hipStream_t stream, uint flags);
 
-  hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue);
+  hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue, uint32_t flags = 0);
   hipError_t enqueueRecordCommand(hipStream_t stream, amd::Command* command, bool record);
 };
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -18,23 +18,28 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#include "vdi_common.hpp"
-#ifdef _WIN32
-#include <windows.h>
-#include <d3d9.h>
-#include <d3d10_1.h>
-#include <CL/cl_d3d10.h>
-#include <CL/cl_d3d11.h>
-#include <CL/cl_dx9_media_sharing.h>
-#endif
-#include <CL/cl_icd.h>
+#ifndef HIP_SRC_HIP_VM_H
+#define HIP_SRC_HIP_VM_H
 
-cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {0};
-amd::PlatformIDS amd::PlatformID::Platform = {amd::ICDDispatchedObject::icdVendorDispatch_};
+#include <hip/hip_runtime.h>
+#include "hip_internal.hpp"
 
-RUNTIME_ENTRY(cl_int, clGetDeviceIDs,
-              (cl_platform_id platform, cl_device_type device_type, cl_uint num_entries,
-               cl_device_id* devices, cl_uint* num_devices)) {
-  return CL_SUCCESS;
-}
-RUNTIME_EXIT
+hipError_t ihipFree(void* ptr);
+
+namespace hip {
+class GenericAllocation {
+  void* ptr_;
+  size_t size_;
+  hipMemAllocationProp properties_;
+
+public:
+  GenericAllocation(void* ptr, size_t size, const hipMemAllocationProp& prop): ptr_(ptr), size_(size), properties_(prop) {}
+  ~GenericAllocation() { hipError_t err = ihipFree(ptr_); }
+
+  const hipMemAllocationProp& GetProperties() const { return properties_; }
+  hipMemGenericAllocationHandle_t asMemGenericAllocationHandle() { return reinterpret_cast<hipMemGenericAllocationHandle_t>(this); }
+  amd::Memory& asAmdMemory() { return *amd::MemObjMap::FindMemObj(ptr_); }
+};
+};
+
+#endif //HIP_SRC_HIP_VM_H

@@ -47,18 +47,14 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 #############################
 option(BUILD_HIPIFY_CLANG "Enable building the CUDA->HIP converter" OFF)
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
-option(__HIP_USE_CMPXCHG_FOR_FP_ATOMICS "Enable/Disable FP Atomics version" OFF)
 option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" ON)
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
 set(HIPCC_BIN_DIR "" CACHE STRING "HIPCC and HIPCONFIG binary directories")
 
 if(__HIP_ENABLE_PCH)
   set(_pchStatus 1)
 else()
   set(_pchStatus 0)
-endif()
-
-if(__HIP_USE_CMPXCHG_FOR_FP_ATOMICS)
-  add_definitions(-D__HIP_USE_CMPXCHG_FOR_FP_ATOMICS)
 endif()
 
 message(STATUS "HIPCC_BIN_DIR found at ${HIPCC_BIN_DIR}")
@@ -143,6 +139,8 @@ if(GIT_FOUND)
     set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
   endif()
 else()
+  set(HIP_VERSION_BUILD_ID 0)
+  set(HIP_VERSION_BUILD_NAME "")
   # FIXME: Some parts depend on this being set.
   set(HIP_PACKAGING_VERSION_PATCH "0")
 endif()
@@ -186,14 +184,17 @@ set (HIP_LIB_VERSION_MAJOR ${HIP_VERSION_MAJOR})
 set (HIP_LIB_VERSION_MINOR ${HIP_VERSION_MINOR})
 if (${ROCM_PATCH_VERSION} )
    set (HIP_LIB_VERSION_PATCH ${ROCM_PATCH_VERSION})
-else ()
+elseif (DEFINED HIP_VERSION_GITHASH)
    set (HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
+else ()
+   set (HIP_LIB_VERSION_PATCH ${HIP_VERSION_PATCH})
 endif ()
 set (HIP_LIB_VERSION_STRING "${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR}.${HIP_LIB_VERSION_PATCH}")
 if (DEFINED ENV{ROCM_RPATH})
     set (CMAKE_INSTALL_RPATH "$ENV{ROCM_RPATH}")
     set (CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
     set (CMAKE_SKIP_BUILD_RPATH TRUE)
+    set (CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
 endif ()
 
 # overwrite HIP_VERSION_PATCH for packaging
@@ -246,7 +247,7 @@ message (STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
 
 # Determine HIP install path
 if (UNIX)
-    set(HIP_DEFAULT_INSTALL_PREFIX "${ROCM_PATH}/hip")
+    set(HIP_DEFAULT_INSTALL_PREFIX "${ROCM_PATH}")
 endif()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Installation path for HIP" FORCE)
@@ -256,8 +257,41 @@ if(DEV_LOG_ENABLE MATCHES "yes")
   add_definitions(-DDEV_LOG_ENABLE)
 endif()
 
-# Set default install path as "${ROCM_PATH}/hip", can override the path from cmake build.
+# Set default install path as "${ROCM_PATH}", can override the path from cmake build.
 set(CPACK_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Package Installation path for HIP")
+
+#TODO: Workaround to handle hip installation in /opt/rocm
+#Once the build script(prototype) changes for file reorg are merged, this should be removed
+# CPACK_INSTALL_PREFIX = /opt/rocm-ver/hip
+# CMAKE_INSTALL_PREFIX = /xxx/out/OS-Name/OS-Version/hip
+# The workaround will remove the destination name "hip" from the prefix path
+if(NOT WIN32)
+    if(FILE_REORG_BACKWARD_COMPATIBILITY)
+        #In jenkins and docker builds using build_hip_on_rocclr.sh, the CPACK_INSTALL_PREFIX path will contain string "/opt/rocm"
+        # Use that condition to remove string "hip"
+        if(CPACK_INSTALL_PREFIX)
+            string(FIND ${CPACK_INSTALL_PREFIX} "/opt/rocm" ROCMDIR_FOUND)
+            if(NOT ${ROCMDIR_FOUND} MATCHES "-1")
+                get_filename_component(DEST_DIR ${CPACK_INSTALL_PREFIX} NAME)
+                if(DEST_DIR STREQUAL "hip")
+                    get_filename_component(CPACK_INSTALL_PREFIX ${CPACK_INSTALL_PREFIX} DIRECTORY)
+                endif()#end  of DEST_DIR check
+            endif()#end of rocm dir check
+        endif()
+
+        #In jenkins and docker builds using build_hip_on_rocclr.sh, the CMAKE_INSTALL_PREFIX path will contain string "/out/"
+        if(CMAKE_INSTALL_PREFIX)
+            string(FIND ${CMAKE_INSTALL_PREFIX} "/out/" OUTDIR_FOUND)
+            if(NOT ${OUTDIR_FOUND} MATCHES "-1")
+                get_filename_component(DEST_DIR ${CMAKE_INSTALL_PREFIX} NAME)
+                if(DEST_DIR STREQUAL "hip")
+                    get_filename_component(CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} DIRECTORY)
+                endif()#end  of DEST_DIR check
+            endif()#end of out dir find check
+        endif()
+
+    endif()#End of File reorg check
+endif()#end of OS check  #end of TODO
 
 if(IS_ABSOLUTE ${CMAKE_INSTALL_PREFIX})
     message(STATUS "HIP will be installed in: " ${CMAKE_INSTALL_PREFIX})
@@ -268,7 +302,7 @@ endif()
 # set the installation path for the installer package
 set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
 if (NOT CPACK_SET_DESTDIR)
-  set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}/hip" CACHE PATH "Default installation path of hcc installer package")
+  set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Default installation path of hcc installer package")
 endif (NOT CPACK_SET_DESTDIR)
 
 #############################
@@ -348,17 +382,25 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
       endif()
     else()
       # Exclude .bat files on Linux.
+      #Hip bin files moved to /opt/rocm/bin and the file permission need to set properly
       install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
+              DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
               PATTERN *.bat EXCLUDE)
     endif()
 
-    # The following two lines will be removed after upstream updation
-    install(CODE "MESSAGE(\"Removing ${CMAKE_INSTALL_PREFIX}/include\")")
-    install(CODE "file(REMOVE_RECURSE ${CMAKE_INSTALL_PREFIX}/include)")
+    if(WIN32) #not required for flat folder structure
+      # The following two lines will be removed after upstream updation
+      install(CODE "MESSAGE(\"Removing ${CMAKE_INSTALL_PREFIX}/include\")")
+      install(CODE "file(REMOVE_RECURSE ${CMAKE_INSTALL_PREFIX}/include)")
+    endif()
 
     install(DIRECTORY include DESTINATION .)
     install(DIRECTORY ${HIP_COMMON_INCLUDE_DIR}/hip/ DESTINATION include/hip/)
-    install(DIRECTORY ${HIP_COMMON_DIR}/cmake DESTINATION .)
+    if(WIN32)
+      install(DIRECTORY ${HIP_COMMON_DIR}/cmake DESTINATION .)
+    else()
+      install(DIRECTORY ${HIP_COMMON_DIR}/cmake/ DESTINATION CONFIG_PACKAGE_INSTALL_DIR)
+    endif()
 endif()
 
 # Install generated headers
@@ -370,6 +412,18 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin DESTINATION . USE_SOURCE_PERMI
 endif()
 install(FILES ${PROJECT_BINARY_DIR}/include/hip/hip_version.h
         DESTINATION include/hip)
+
+if (NOT ${HIPCC_BIN_DIR} STREQUAL "")
+  file(TO_CMAKE_PATH "${HIPCC_BIN_DIR}" HIPCC_BIN_DIR)
+  set(hipcc_bin ${HIPCC_BIN_DIR}/hipcc.bin)
+  set(hipconfig_bin ${HIPCC_BIN_DIR}/hipconfig.bin)
+  if(WIN32)
+    set(hipcc_bin ${hipcc_bin}.exe)
+    set(hipconfig_bin ${hipconfig_bin}.exe)
+  endif()
+  install(PROGRAMS ${hipcc_bin} DESTINATION bin)
+  install(PROGRAMS ${hipconfig_bin} DESTINATION bin)
+endif()
 
 #############################
 # hip-config
@@ -455,4 +509,9 @@ if(HIP_HIPCC_EXECUTABLE)
     endif()
 endif()
 
-# vim: ts=4:sw=4:expandtab:smartindent
+#File reorg Backward compatibility function
+if(NOT WIN32)
+    if(FILE_REORG_BACKWARD_COMPATIBILITY)
+        include(hip-backward-compat.cmake)
+    endif()
+endif()
