@@ -1125,6 +1125,11 @@ inline hipError_t ihipMemcpySymbol_validate(const void* symbol, size_t sizeBytes
 hipError_t hipMemcpyToSymbol_common(const void* symbol, const void* src, size_t sizeBytes,
                              size_t offset, hipMemcpyKind kind, hipStream_t stream=nullptr) {
   CHECK_STREAM_CAPTURING();
+
+  if (kind != hipMemcpyHostToDevice && kind != hipMemcpyDeviceToDevice) {
+    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+  }
+
   size_t sym_size = 0;
   hipDeviceptr_t device_ptr = nullptr;
 
@@ -1153,6 +1158,11 @@ hipError_t hipMemcpyToSymbol_spt(const void* symbol, const void* src, size_t siz
 hipError_t hipMemcpyFromSymbol_common(void* dst, const void* symbol, size_t sizeBytes,
                                size_t offset, hipMemcpyKind kind, hipStream_t stream=nullptr) {
   CHECK_STREAM_CAPTURING();
+
+  if (kind != hipMemcpyDeviceToHost && kind != hipMemcpyDeviceToDevice) {
+    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+  }
+
   size_t sym_size = 0;
   hipDeviceptr_t device_ptr = nullptr;
 
@@ -1184,6 +1194,10 @@ hipError_t hipMemcpyToSymbolAsync(const void* symbol, const void* src, size_t si
 
   STREAM_CAPTURE(hipMemcpyToSymbolAsync, stream, symbol, src, sizeBytes, offset, kind);
 
+  if (kind != hipMemcpyHostToDevice && kind != hipMemcpyDeviceToDevice) {
+    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+  }
+
   size_t sym_size = 0;
   hipDeviceptr_t device_ptr = nullptr;
 
@@ -1200,6 +1214,10 @@ hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBy
   HIP_INIT_API(hipMemcpyFromSymbolAsync, symbol, dst, sizeBytes, offset, kind, stream);
 
   STREAM_CAPTURE(hipMemcpyFromSymbolAsync, stream, dst, symbol, sizeBytes, offset, kind);
+
+  if (kind != hipMemcpyDeviceToHost && kind != hipMemcpyDeviceToDevice) {
+    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+  }
 
   size_t sym_size = 0;
   hipDeviceptr_t device_ptr = nullptr;
@@ -2013,11 +2031,11 @@ hipError_t ihipMemcpyParam2D(const hip_Memcpy2D* pCopy,
 hipError_t ihipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                         size_t height, hipMemcpyKind kind, hipStream_t stream, bool isAsync = false) {
   hip_Memcpy2D desc = {};
-  if (spitch == 0 || dpitch == 0) {
-    return hipErrorUnknown;
-  }
-  if (width == 0 || height == 0) {
+  if ((width == 0) || (height == 0)) {
     return hipSuccess;
+  }
+  if ((width > dpitch) || (width > spitch)) {
+    return hipErrorInvalidPitchValue;
   }
 
   desc.srcXInBytes = 0;
