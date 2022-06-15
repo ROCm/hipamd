@@ -139,8 +139,9 @@ class RTCProgram {
   bool addSource(const std::string& source, const std::string& name);
   bool addHeader(const std::string& source, const std::string& name);
   bool compile(const std::vector<std::string>& options);
-  bool getDemangledName(const char* name_expression, const char** loweredName);
+  bool getMangledName(const char* name_expression, const char** loweredName);
   bool trackMangledName(std::string& name);
+  void stripNamedExpression(std::string& named_expression);
 
   const std::vector<char>& getExec() const { return executable; }
   size_t getExecSize() const { return executable.size(); }

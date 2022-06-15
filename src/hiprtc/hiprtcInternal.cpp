@@ -278,25 +278,21 @@ bool RTCProgram::compile(const std::vector<std::string>& options) {
   }
 
   std::vector<std::string> mangledNames;
-  if (!fillDemangledNames(executable, mangledNames)) {
-    LogError("Error in hiprtc: unable to fill demangled names");
+  if (!fillMangledNames(executable, mangledNames)) {
+    LogError("Error in hiprtc: unable to fill mangled names");
     return false;
   }
 
-  if (!getMangledNames(mangledNames, strippedNames, demangledNames)) {
-    LogError("Error in hiprtc: unable to get mangled names");
+  if (!getDemangledNames(mangledNames, demangledNames)) {
+    LogError("Error in hiprtc: unable to get demangled names");
     return false;
   }
 
   return true;
 }
 
-bool RTCProgram::trackMangledName(std::string& name) {
-  amd::ScopedLock lock(lock_);
+void RTCProgram::stripNamedExpression(std::string& strippedName) {
 
-  if (name.size() == 0) return false;
-
-  std::string strippedName = name;
   if (strippedName.back() == ')') {
     strippedName.pop_back();
     strippedName.erase(0, strippedName.find('('));
@@ -304,16 +300,24 @@ bool RTCProgram::trackMangledName(std::string& name) {
   if (strippedName.front() == '&') {
     strippedName.erase(0, 1);
   }
-
-  std::string strippedNameNoSpace = strippedName;
-  strippedNameNoSpace.erase(std::remove_if(strippedNameNoSpace.begin(),
-                                           strippedNameNoSpace.end(),
+  // Removes the spaces from strippedName if present
+  strippedName.erase(std::remove_if(strippedName.begin(),
+                                           strippedName.end(),
                                            [](unsigned char c) {
                                              return std::isspace(c);
-                                           }), strippedNameNoSpace.end());
+                                           }), strippedName.end());
+}
+
+bool RTCProgram::trackMangledName(std::string& name) {
+  amd::ScopedLock lock(lock_);
+
+  if (name.size() == 0) return false;
+
+  std::string strippedNameNoSpace = name;
+  stripNamedExpression(strippedNameNoSpace);
 
   strippedNames.insert(std::pair<std::string, std::string>(name, strippedNameNoSpace));
-  demangledNames.insert(std::pair<std::string, std::string>(strippedName, ""));
+  demangledNames.insert(std::pair<std::string, std::string>(strippedNameNoSpace, ""));
 
   const auto var{"__hiprtc_" + std::to_string(strippedNames.size())};
   const auto code{"\nextern \"C\" constexpr auto " + var + " = " + name + ";\n"};
@@ -322,23 +326,17 @@ bool RTCProgram::trackMangledName(std::string& name) {
   return true;
 }
 
-bool RTCProgram::getDemangledName(const char* name_expression, const char** loweredName) {
-  std::string name = name_expression;
-  if (auto res = strippedNames.find(name); res != strippedNames.end()) {
-    if (auto dres = demangledNames.find(res->second); dres != demangledNames.end()) {
-      if (dres->second.size() != 0) {
-        *loweredName = dres->second.c_str();
-        return true;
-      } else
-        return false;
-    }
-  }
-  if (auto dres = demangledNames.find(name); dres != demangledNames.end()) {
+bool RTCProgram::getMangledName(const char* name_expression, const char** loweredName) {
+
+  std::string strippedName = name_expression;
+  stripNamedExpression(strippedName);
+
+  if (auto dres = demangledNames.find(strippedName); dres != demangledNames.end()) {
     if (dres->second.size() != 0) {
       *loweredName = dres->second.c_str();
       return true;
-    }
-    return false;
+    } else
+      return false;
   }
   return false;
 }
