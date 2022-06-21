@@ -600,6 +600,13 @@ hipError_t hipMemPtrGetInfo(void *ptr, size_t *size) {
 hipError_t hipHostFree(void* ptr) {
   HIP_INIT_API(hipHostFree, ptr);
   CHECK_STREAM_CAPTURE_SUPPORTED();
+  size_t offset = 0;
+  amd::Memory* memory_object = getMemoryObject(ptr, offset);
+  if (memory_object != nullptr) {
+    if (memory_object->getSvmPtr() == nullptr) {
+      return hipErrorInvalidValue;
+    }
+  }
   HIP_RETURN(ihipFree(ptr));
 }
 
@@ -964,6 +971,9 @@ hipError_t hipMallocArray(hipArray** array,
                           size_t height,
                           unsigned int flags) {
   HIP_INIT_API(hipMallocArray, array, desc, width, height, flags);
+  if (array == nullptr || desc == nullptr) {
+    return hipErrorInvalidValue;
+  }
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {width,
                                           height,
@@ -989,6 +999,9 @@ hipError_t hipMalloc3DArray(hipArray_t* array,
                             hipExtent extent,
                             unsigned int flags) {
   HIP_INIT_API(hipMalloc3DArray, array, desc, extent, flags);
+  if (array == nullptr || desc == nullptr) {
+    return hipErrorInvalidValue;
+  }
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {extent.width,
                                           extent.height,
