@@ -382,6 +382,9 @@ global:
     hipGraphExecUpdate;
     hipGraphInstantiateWithFlags;
     hipGraphExecMemsetNodeSetParams;
+    hipDeviceGetGraphMemAttribute;
+    hipDeviceSetGraphMemAttribute;
+    hipDeviceGraphMemTrim;
     amd_dbgapi_get_build_name;
     amd_dbgapi_get_git_hash;
     amd_dbgapi_get_build_id;
@@ -398,6 +401,8 @@ global:
     hipPointerGetAttribute;
     hipDrvPointerGetAttributes;
     hipThreadExchangeStreamCaptureMode;
+    hipGraphKernelNodeSetAttribute;
+    hipGraphKernelNodeGetAttribute;
 local:
     *;
 } hip_4.5;
@@ -464,3 +469,12 @@ global:
 local:
     *;
 } hip_5.1;
+
+hip_5.3 {
+global:
+    hipDeviceSetLimit;
+    hiprtcGetBitcode;
+    hiprtcGetBitcodeSize;
+local:
+    *;
+} hip_5.2;

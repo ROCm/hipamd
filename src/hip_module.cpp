@@ -217,13 +217,6 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, uint32_t globalWorkSizeX,
     return hipErrorInvalidValue;
   }
 
-  if (extra != nullptr) {
-    if (extra[0] != HIP_LAUNCH_PARAM_BUFFER_POINTER || extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE ||
-        extra[4] != HIP_LAUNCH_PARAM_END) {
-      return hipErrorNotInitialized;
-    }
-  }
-
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   // Make sure dispatch doesn't exceed max workgroup size limit
   if (blockDimX * blockDimY * blockDimZ > device->info().maxWorkGroupSize_) {
@@ -674,7 +667,11 @@ hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const
 
   // Texture references created by HIP driver API
   // have the default read mode set to normalized float.
+  // have format set to format float
+  // set num of channels to 1
   (*texRef)->readMode = hipReadModeNormalizedFloat;
+  (*texRef)->format = HIP_AD_FORMAT_FLOAT;
+  (*texRef)->numChannels = 1;
 
   hipError_t err = PlatformState::instance().registerTexRef(*texRef, hmod, std::string(name));
 

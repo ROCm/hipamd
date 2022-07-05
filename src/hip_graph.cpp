@@ -43,22 +43,16 @@ inline hipError_t ihipGraphAddNode(hipGraphNode_t graphNode, hipGraph_t graph,
 
 
 hipError_t ihipValidateKernelParams(const hipKernelNodeParams* pNodeParams) {
-  if (pNodeParams->kernelParams == nullptr) {
-    return hipErrorInvalidValue;
-  }
   hipFunction_t func = nullptr;
   hipError_t status = hipGraphKernelNode::getFunc(&func, *pNodeParams, ihipGetDevice());
   if (status != hipSuccess) {
     return hipErrorInvalidDeviceFunction;
   }
+
   size_t globalWorkSizeX = static_cast<size_t>(pNodeParams->gridDim.x) * pNodeParams->blockDim.x;
   size_t globalWorkSizeY = static_cast<size_t>(pNodeParams->gridDim.y) * pNodeParams->blockDim.y;
   size_t globalWorkSizeZ = static_cast<size_t>(pNodeParams->gridDim.z) * pNodeParams->blockDim.z;
-  if (globalWorkSizeX > std::numeric_limits<uint32_t>::max() ||
-      globalWorkSizeY > std::numeric_limits<uint32_t>::max() ||
-      globalWorkSizeZ > std::numeric_limits<uint32_t>::max()) {
-    return hipErrorInvalidConfiguration;
-  }
+
   status = ihipLaunchKernel_validate(
       func, static_cast<uint32_t>(globalWorkSizeX), static_cast<uint32_t>(globalWorkSizeY),
       static_cast<uint32_t>(globalWorkSizeZ), pNodeParams->blockDim.x, pNodeParams->blockDim.y,
@@ -81,15 +75,28 @@ hipError_t ihipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   if (!ihipGraph::isGraphValid(graph)) {
     return hipErrorInvalidValue;
   }
-  hipError_t status = ihipValidateKernelParams(pNodeParams);
-  if (hipSuccess != status) {
-    return status;
-  }
+
   hipFunction_t func = nullptr;
-  status = hipGraphKernelNode::getFunc(&func, *pNodeParams, ihipGetDevice());
+  hipError_t status = hipGraphKernelNode::getFunc(&func, *pNodeParams, ihipGetDevice());
   if (status != hipSuccess) {
     return hipErrorInvalidDeviceFunction;
   }
+
+  // If neither 'kernelParams' or 'extra' are provided or if both are provided, return error
+  if ((pNodeParams->kernelParams == nullptr && pNodeParams->extra == nullptr) ||
+      (pNodeParams->kernelParams != nullptr) && (pNodeParams->extra != nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  size_t globalWorkSizeX = static_cast<size_t>(pNodeParams->gridDim.x) * pNodeParams->blockDim.x;
+  size_t globalWorkSizeY = static_cast<size_t>(pNodeParams->gridDim.y) * pNodeParams->blockDim.y;
+  size_t globalWorkSizeZ = static_cast<size_t>(pNodeParams->gridDim.z) * pNodeParams->blockDim.z;
+  if (globalWorkSizeX > std::numeric_limits<uint32_t>::max() ||
+      globalWorkSizeY > std::numeric_limits<uint32_t>::max() ||
+      globalWorkSizeZ > std::numeric_limits<uint32_t>::max()) {
+    return hipErrorInvalidConfiguration;
+  }
+
   *pGraphNode = new hipGraphKernelNode(pNodeParams, func);
   status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies);
   return status;
@@ -1113,6 +1120,30 @@ hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node, hipMemcpy3DParms* pN
   HIP_RETURN(hipSuccess);
 }
 
+hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
+                                          const hipKernelNodeAttrValue* value) {
+  HIP_INIT_API(hipGraphKernelNodeSetAttribute, hNode, attr, value);
+  if (hNode == nullptr || value == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (attr != hipKernelNodeAttributeAccessPolicyWindow && attr != hipKernelNodeAttributeCooperative ) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(reinterpret_cast<hipGraphKernelNode*>(hNode)->SetAttrParams(attr, value));
+}
+
+hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
+                                          hipKernelNodeAttrValue* value) {
+  HIP_INIT_API(hipGraphKernelNodeGetAttribute, hNode, attr, value);
+  if (hNode == nullptr || value == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (attr != hipKernelNodeAttributeAccessPolicyWindow && attr != hipKernelNodeAttributeCooperative ) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(reinterpret_cast<hipGraphKernelNode*>(hNode)->GetAttrParams(attr, value));
+}
+
 hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node, const hipMemcpy3DParms* pNodeParams) {
   HIP_INIT_API(hipGraphMemcpyNodeSetParams, node, pNodeParams);
   if (node == nullptr || pNodeParams == nullptr) {
@@ -1190,6 +1221,7 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
   for (size_t i = 0; i < numDependencies; i++) {
     // When the same node is specified for both from and to
     if (from[i] == nullptr || to[i] == nullptr || from[i] == to[i] ||
+        !hipGraphNode::isNodeValid(to[i]) || !hipGraphNode::isNodeValid(from[i]) ||
         // making sure the nodes blong to the graph
         to[i]->GetParentGraph() != graph || from[i]->GetParentGraph() != graph) {
       HIP_RETURN(hipErrorInvalidValue);
@@ -1247,13 +1279,23 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
     HIP_RETURN(hipErrorUnknown);
   }
 
-  hipGraphNode_t hipErrorNode_out;
-  hipGraphExecUpdateResult updateResult_out;
-  // Check if this instantiated graph is updatable. All restrictions in hipGraphExecUpdate() apply.
-  hipError_t status =
-      hipGraphExecUpdate(hGraphExec, childGraph, &hipErrorNode_out, &updateResult_out);
-  if (status != hipSuccess) {
-    HIP_RETURN(status);
+// Validate whether the topology of node and childGraph matches
+  std::vector<Node> childGraphNodes1;
+  node->LevelOrder(childGraphNodes1);
+
+  std::vector<Node> childGraphNodes2;
+  childGraph->LevelOrder(childGraphNodes2);
+
+  if (childGraphNodes1.size() != childGraphNodes2.size()) {
+    HIP_RETURN(hipErrorUnknown);
+  }
+  // Validate if the node insertion order matches
+  else {
+    for (std::vector<Node>::size_type i = 0; i != childGraphNodes1.size(); i++) {
+      if (childGraphNodes1[i]->GetType() != childGraphNodes2[i]->GetType()) {
+        HIP_RETURN(hipErrorUnknown);
+      }
+    }
   }
 
   hipGraphNode_t clonedNode = hGraphExec->GetClonedNode(node);
@@ -1326,7 +1368,7 @@ hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t
   }
   if (numDependencies > 0 && dependencies == nullptr ||
       (numDependencies > s->GetLastCapturedNodes().size()) ||
-      (flags != 0 && (flags != hipStreamAddCaptureDependencies ||
+      (flags != 0 && !(flags != hipStreamAddCaptureDependencies ||
        flags != hipStreamSetCaptureDependencies))) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -1793,4 +1835,57 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
   }
   *updateResult_out = hipGraphExecUpdateSuccess;
   HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {
+  HIP_INIT_API(hipDeviceGetGraphMemAttribute, device, attr, value);
+  if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0 || value == nullptr) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  // later use this to access memory pool
+  auto* deviceHandle = g_devices[device]->devices()[0];
+  switch (attr) {
+    case hipGraphMemAttrUsedMemCurrent:
+      *reinterpret_cast<int32_t*>(value) = 0;
+      break;
+    case hipGraphMemAttrUsedMemHigh:
+      *reinterpret_cast<int32_t*>(value) = 0;
+      break;
+    case hipGraphMemAttrReservedMemCurrent:
+      *reinterpret_cast<int32_t*>(value) = 0;
+      break;
+    case hipGraphMemAttrReservedMemHigh:
+      *reinterpret_cast<int32_t*>(value) = 0;
+      break;
+    default:
+      return HIP_RETURN(hipErrorInvalidValue);
+  }
+  return HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {
+  HIP_INIT_API(hipDeviceSetGraphMemAttribute, device, attr, value);
+  if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0 || value == nullptr) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  // later use this to access memory pool
+  auto* deviceHandle = g_devices[device]->devices()[0];
+  switch (attr) {
+    case hipGraphMemAttrUsedMemHigh:
+      break;
+    case hipGraphMemAttrReservedMemHigh:
+      break;
+    default:
+      return HIP_RETURN(hipErrorInvalidValue);
+  }
+  return HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipDeviceGraphMemTrim(int device) {
+  HIP_INIT_API(hipDeviceGraphMemTrim, device);
+  if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  // not implemented yet
+  return HIP_RETURN(hipSuccess);
 }

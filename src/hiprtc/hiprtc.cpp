@@ -108,13 +108,18 @@ hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char
 
   auto* rtcProgram = hiprtc::RTCCompileProgram::as_RTCCompileProgram(prog);
 
+  bool fgpu_rdc = false;
   std::vector<std::string> opt;
   opt.reserve(numOptions);
   for (int i = 0; i < numOptions; i++) {
-    opt.push_back(std::string(options[i]));
+    if(std::string(options[i]) == std::string("-fgpu-rdc")) {
+      fgpu_rdc = true;
+    } else {
+      opt.push_back(std::string(options[i]));
+    }
   }
 
-  if (!rtcProgram->compile(opt)) {
+  if (!rtcProgram->compile(opt, fgpu_rdc)) {
     HIPRTC_RETURN(HIPRTC_ERROR_COMPILATION);
   }
 
@@ -146,7 +151,7 @@ hiprtcResult hiprtcGetLoweredName(hiprtcProgram prog, const char* name_expressio
 
   auto* rtcProgram = hiprtc::RTCCompileProgram::as_RTCCompileProgram(prog);
 
-  if (!rtcProgram->getDemangledName(name_expression, loweredName)) {
+  if (!rtcProgram->getMangledName(name_expression, loweredName)) {
     return HIPRTC_RETURN(HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID);
   }
 
@@ -227,11 +232,36 @@ hiprtcResult hiprtcVersion(int* major, int* minor) {
   HIPRTC_RETURN(HIPRTC_SUCCESS);
 }
 
+hiprtcResult hiprtcGetBitcode (hiprtcProgram prog, char* bitcode) {
+  if (bitcode == nullptr) {
+    HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
+  }
+
+  auto* rtcProgram = hiprtc::RTCCompileProgram::as_RTCCompileProgram(prog);
+  if (!rtcProgram->GetBitcode(bitcode)) {
+    HIPRTC_RETURN(HIPRTC_ERROR_INVALID_PROGRAM);
+  }
+  HIPRTC_RETURN(HIPRTC_SUCCESS);
+}
+
+hiprtcResult hiprtcGetBitcodeSize(hiprtcProgram prog, size_t* bitcode_size) {
+  if (bitcode_size == nullptr) {
+    HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
+  }
+
+  auto* rtcProgram = hiprtc::RTCCompileProgram::as_RTCCompileProgram(prog);
+  if (!rtcProgram->GetBitcodeSize(bitcode_size)) {
+    HIPRTC_RETURN(HIPRTC_ERROR_INVALID_PROGRAM);
+  }
+
+  HIPRTC_RETURN(HIPRTC_SUCCESS);
+}
+
 hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option* options_ptr,
                               void** options_vals_pptr, hiprtcLinkState* hip_link_state_ptr) {
   HIPRTC_INIT_API(num_options, options_ptr, options_vals_pptr, hip_link_state_ptr);
 
-  if (options_ptr == nullptr || options_vals_pptr == nullptr || hip_link_state_ptr == nullptr) {
+  if (hip_link_state_ptr == nullptr) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
 
@@ -277,11 +307,11 @@ hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
   HIPRTC_INIT_API(hip_link_state, image, image_size, name, num_options, options_ptr,
                   option_values);
 
-  if (image == nullptr || image_size <= 0 || name == nullptr) {
+  if (image == nullptr || image_size <= 0) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
 
-  if (input_type == HIPRTC_JIT_INPUT_CUBIN || input_type == HIPRTC_JIT_INPUT_PTX 
+  if (input_type == HIPRTC_JIT_INPUT_CUBIN || input_type == HIPRTC_JIT_INPUT_PTX
       || input_type == HIPRTC_JIT_INPUT_FATBINARY || input_type == HIPRTC_JIT_INPUT_OBJECT
       || input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);

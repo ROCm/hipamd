@@ -314,6 +314,8 @@ hipGraphGetNodes
 hipGraphGetRootNodes
 hipGraphKernelNodeGetParams
 hipGraphKernelNodeSetParams
+hipGraphKernelNodeSetAttribute
+hipGraphKernelNodeGetAttribute
 hipGraphMemcpyNodeGetParams
 hipGraphMemcpyNodeSetParams
 hipGraphMemsetNodeGetParams
@@ -359,6 +361,9 @@ hipGraphExecHostNodeSetParams
 hipGraphExecUpdate
 hipGraphInstantiateWithFlags
 hipGraphExecMemsetNodeSetParams
+hipDeviceGetGraphMemAttribute
+hipDeviceSetGraphMemAttribute
+hipDeviceGraphMemTrim
 amd_dbgapi_get_build_name
 amd_dbgapi_get_git_hash
 amd_dbgapi_get_build_id
@@ -396,3 +401,8 @@ hipStreamWaitEvent_spt
 hipEventRecord_spt
 hipLaunchKernel_spt
 hipLaunchCooperativeKernel_spt
+hipStreamWriteValue32
+hipStreamWriteValue64
+hipStreamWaitValue32
+hipStreamWaitValue64
+hipGetStreamDeviceId

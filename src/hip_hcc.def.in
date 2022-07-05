@@ -267,6 +267,8 @@ hiprtcGetProgramLogSize
 hiprtcGetCode
 hiprtcGetCodeSize
 hiprtcGetErrorString
+hiprtcGetBitcode
+hiprtcGetBitcodeSize
 hiprtcLinkCreate
 hiprtcLinkAddFile
 hiprtcLinkAddData
@@ -328,6 +330,8 @@ hipGraphGetRootNodes
 hipGraphKernelNodeGetParams
 hipGraphKernelNodeSetParams
 hipGraphMemcpyNodeGetParams
+hipGraphKernelNodeSetAttribute
+hipGraphKernelNodeGetAttribute
 hipGraphMemcpyNodeSetParams
 hipGraphMemsetNodeGetParams
 hipGraphMemsetNodeSetParams
@@ -370,6 +374,9 @@ hipGraphExecHostNodeSetParams
 hipGraphExecUpdate
 hipGraphInstantiateWithFlags
 hipGraphExecMemsetNodeSetParams
+hipDeviceGetGraphMemAttribute
+hipDeviceSetGraphMemAttribute
+hipDeviceGraphMemTrim
 amd_dbgapi_get_build_name
 amd_dbgapi_get_git_hash
 amd_dbgapi_get_build_id
@@ -409,3 +416,9 @@ hipStreamWaitEvent_spt
 hipEventRecord_spt
 hipLaunchKernel_spt
 hipLaunchCooperativeKernel_spt
+hipStreamWriteValue32
+hipStreamWriteValue64
+hipStreamWaitValue32
+hipStreamWaitValue64
+hipDeviceSetLimit
+hipGetStreamDeviceId

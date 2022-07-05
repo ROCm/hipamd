@@ -37,7 +37,8 @@ typedef hipGraphNode* Node;
 hipError_t ihipValidateKernelParams(const hipKernelNodeParams* pNodeParams);
 hipError_t FillCommands(std::vector<std::vector<Node>>& parallelLists,
                         std::unordered_map<Node, std::vector<Node>>& nodeWaitLists,
-                        std::vector<Node>& levelOrder, amd::Command*& rootCommand,
+                        std::vector<Node>& levelOrder,
+                        std::vector<amd::Command*>& rootCommands,
                         amd::Command*& endCommand, amd::HostQueue* queue);
 void UpdateQueue(std::vector<std::vector<Node>>& parallelLists, amd::HostQueue*& queue,
                  hipGraphExec* ptr);
@@ -60,6 +61,7 @@ struct hipGraphNode {
   struct ihipGraph* parentGraph_;
   static std::unordered_set<hipGraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
+  hipKernelNodeAttrValue kernelAttr_;
 
  public:
   hipGraphNode(hipGraphNodeType type)
@@ -72,6 +74,7 @@ struct hipGraphNode {
         parentGraph_(nullptr) {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
+    memset(&kernelAttr_, 0, sizeof(kernelAttr_));
   }
   /// Copy Constructor
   hipGraphNode(const hipGraphNode& node) {
@@ -233,7 +236,7 @@ struct ihipGraph {
   std::vector<Node> vertices_;
   const ihipGraph* pOriginalGraph_ = nullptr;
   static std::unordered_set<ihipGraph*> graphSet_;
-  static amd::Monitor graphSetLock_ ;
+  static amd::Monitor graphSetLock_;
 
  public:
   ihipGraph() {
@@ -292,7 +295,7 @@ struct hipGraphExec {
   std::unordered_map<Node, Node> clonedNodes_;
   amd::Command* lastEnqueuedCommand_;
   static std::unordered_set<hipGraphExec*> graphExecSet_;
-  static amd::Monitor graphExecSetLock_ ;
+  static amd::Monitor graphExecSetLock_;
 
  public:
   hipGraphExec(std::vector<Node>& levelOrder, std::vector<std::vector<Node>>& lists,
@@ -306,7 +309,7 @@ struct hipGraphExec {
         currentQueueIndex_(0) {
     amd::ScopedLock lock(graphExecSetLock_);
     graphExecSet_.insert(this);
-        }
+  }
 
   ~hipGraphExec() {
     // new commands are launched for every launch they are destroyed as and when command is
@@ -392,12 +395,12 @@ struct hipChildGraphNode : public hipGraphNode {
       return status;
     }
     commands_.reserve(2);
-    amd::Command* rootCommand = nullptr;
+    std::vector<amd::Command*> rootCommands;
     amd::Command* endCommand = nullptr;
-    status = FillCommands(parallelLists_, nodeWaitLists_, childGraphlevelOrder_, rootCommand,
+    status = FillCommands(parallelLists_, nodeWaitLists_, childGraphlevelOrder_, rootCommands,
                           endCommand, queue);
-    if (rootCommand != nullptr) {
-      commands_.push_back(rootCommand);
+    for (auto& cmd : rootCommands) {
+      commands_.push_back(cmd);
     }
     if (endCommand != nullptr) {
       commands_.push_back(endCommand);
@@ -453,9 +456,11 @@ struct hipChildGraphNode : public hipGraphNode {
 class hipGraphKernelNode : public hipGraphNode {
   hipKernelNodeParams* pKernelParams_;
   hipFunction_t func_;
+  unsigned int numParams_;
 
  public:
-  static hipError_t getFunc(hipFunction_t* func, const hipKernelNodeParams& params, unsigned int device) {
+  static hipError_t getFunc(hipFunction_t* func, const hipKernelNodeParams& params,
+                            unsigned int device) {
     hipError_t status = PlatformState::instance().getStatFunc(func, params.func, device);
     if (status != hipSuccess) {
       *func = reinterpret_cast<hipFunction_t>(params.func);
@@ -465,21 +470,109 @@ class hipGraphKernelNode : public hipGraphNode {
     }
     return hipSuccess;
   }
+
+  hipError_t copyParams(const hipKernelNodeParams* pNodeParams, const hipFunction_t func) {
+    hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
+    amd::Kernel* kernel = function->kernel();
+    const amd::KernelSignature& signature = kernel->signature();
+    numParams_ = signature.numParameters();
+
+    // Allocate/assign memory if params are passed part of 'kernelParams'
+    if (pNodeParams->kernelParams != nullptr) {
+      pKernelParams_->kernelParams = (void**) malloc(numParams_ * sizeof(void*));
+      if (pKernelParams_->kernelParams == nullptr) {
+        return hipErrorOutOfMemory;
+      }
+
+      for (uint32_t i = 0; i < numParams_; ++i) {
+        const amd::KernelParameterDescriptor& desc = signature.at(i);
+          pKernelParams_->kernelParams[i] = malloc(desc.size_);
+          if (pKernelParams_->kernelParams[i] == nullptr) {
+            return hipErrorOutOfMemory;
+          }
+          ::memcpy(pKernelParams_->kernelParams[i], (pNodeParams->kernelParams[i]), desc.size_);
+      }
+    }
+
+    // Allocate/assign memory if params are passed as part of 'extra'
+    else if (pNodeParams->extra != nullptr) {
+      // 'extra' is a struct that contains the following info: {
+      // HIP_LAUNCH_PARAM_BUFFER_POINTER, kernargs,
+      // HIP_LAUNCH_PARAM_BUFFER_SIZE, &kernargs_size,
+      // HIP_LAUNCH_PARAM_END }
+      unsigned int numExtra = 5;
+      pKernelParams_->extra = (void**) malloc(numExtra * sizeof(void *));
+      if (pKernelParams_->extra == nullptr) {
+        return hipErrorOutOfMemory;
+      }
+      pKernelParams_->extra[0] = pNodeParams->extra[0];
+      size_t kernargs_size = *((size_t *)pNodeParams->extra[3]);
+      pKernelParams_->extra[1] = malloc(kernargs_size);
+      if (pKernelParams_->extra[1] == nullptr) {
+        return hipErrorOutOfMemory;
+      }
+      pKernelParams_->extra[2] = pNodeParams->extra[2];
+      pKernelParams_->extra[3] = malloc(sizeof(void *));
+      if (pKernelParams_->extra[3] == nullptr) {
+        return hipErrorOutOfMemory;
+      }
+      *((size_t *)pKernelParams_->extra[3]) = kernargs_size;
+      ::memcpy(pKernelParams_->extra[1], (pNodeParams->extra[1]), kernargs_size);
+      pKernelParams_->extra[4] = pNodeParams->extra[4];
+    }
+    return hipSuccess;
+  }
+
   hipGraphKernelNode(const hipKernelNodeParams* pNodeParams, const hipFunction_t func)
       : hipGraphNode(hipGraphNodeTypeKernel) {
     pKernelParams_ = new hipKernelNodeParams(*pNodeParams);
     func_ = func;
+    hipError_t status = copyParams(pNodeParams, func_);
+    if (status != hipSuccess) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                "[hipGraph] Failed to allocate memory to copy kernel arguments");
+    }
   }
-  ~hipGraphKernelNode() { delete pKernelParams_; }
+  ~hipGraphKernelNode() {
+    // Deallocate memory allocated for kernargs passed via 'kernelParams'
+    if (pKernelParams_->kernelParams != nullptr) {
+      for (size_t i = 0; i < numParams_; ++i) {
+        if (pKernelParams_->kernelParams[i] != nullptr) {
+          free(pKernelParams_->kernelParams[i]);
+        }
+        pKernelParams_->kernelParams[i] = nullptr;
+      }
+      free(pKernelParams_->kernelParams);
+      pKernelParams_->kernelParams = nullptr;
+    }
+    // Deallocate memory allocated for kernargs passed via 'extra'
+    else {
+      free(pKernelParams_->extra[1]);
+      free(pKernelParams_->extra[3]);
+      free(pKernelParams_->extra);
+    }
+    delete pKernelParams_;
+  }
+
   hipGraphKernelNode(const hipGraphKernelNode& rhs) : hipGraphNode(rhs) {
     pKernelParams_ = new hipKernelNodeParams(*rhs.pKernelParams_);
     func_ = rhs.func_;
+    numParams_ = rhs.numParams_;
+    hipError_t status = copyParams(rhs.pKernelParams_, func_);
+    if (status != hipSuccess) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph] Failed to allocate memory to deep copy kernargs");
+    }
   }
   hipGraphNode* clone() const {
     return new hipGraphKernelNode(static_cast<hipGraphKernelNode const&>(*this));
   }
   hipError_t CreateCommand(amd::HostQueue* queue) {
-    hipError_t status = hipGraphNode::CreateCommand(queue);
+    hipError_t status = ihipValidateKernelParams(pKernelParams_);
+    if (hipSuccess != status) {
+      return status;
+    }
+    status = hipGraphNode::CreateCommand(queue);
     if (status != hipSuccess) {
       return status;
     }
@@ -504,6 +597,11 @@ class hipGraphKernelNode : public hipGraphNode {
     if (hipSuccess != status) {
       return status;
     }
+
+    hip::DeviceFunc* oldFunction = hip::DeviceFunc::asFunction(func_);
+    amd::Kernel* oldKernel = oldFunction->kernel();
+    const amd::KernelSignature& oldSignature = oldKernel->signature();
+
     if (params->func != pKernelParams_->func) {
       hipFunction_t func = nullptr;
       hipError_t status = hipGraphKernelNode::getFunc(&func, *params, ihipGetDevice());
@@ -512,8 +610,116 @@ class hipGraphKernelNode : public hipGraphNode {
       }
       func_ = func;
     }
-    std::memcpy(pKernelParams_, params, sizeof(hipKernelNodeParams));
+
+    hip::DeviceFunc* newFunction = hip::DeviceFunc::asFunction(func_);
+    amd::Kernel* newKernel = newFunction->kernel();
+    const amd::KernelSignature& newSignature = newKernel->signature();
+    unsigned int numParams = newSignature.numParameters();
+    // When params are passed in 'kernelParams' reallocate for updated func and its params
+    if (params->kernelParams != nullptr) {
+      if (numParams != numParams_) {
+        pKernelParams_->kernelParams = (void **) realloc(pKernelParams_->kernelParams,
+                                                         numParams * sizeof(void *));
+        if (pKernelParams_->kernelParams == nullptr) {
+          return hipErrorOutOfMemory;
+        }
+      }
+
+      uint32_t i = 0;
+      int minParams = std::min(numParams, numParams_);
+      // Rewrite the contents in kernelParams
+      for (i = 0; i < minParams; ++i) {
+        const amd::KernelParameterDescriptor& newDesc = newSignature.at(i);
+        const amd::KernelParameterDescriptor& oldDesc = oldSignature.at(i);
+
+        if (newDesc.size_ != oldDesc.size_) {
+          pKernelParams_->kernelParams[i] = (void *) realloc(pKernelParams_->kernelParams[i],
+                                                             newDesc.size_);
+          if (pKernelParams_->kernelParams[i] == nullptr) {
+            return hipErrorOutOfMemory;
+          }
+        }
+        ::memcpy(pKernelParams_->kernelParams[i], (params->kernelParams[i]), newDesc.size_);
+      }
+      // If the numParams of the new func is greater than old func, allocate
+      if ((numParams > numParams_)) {
+        const amd::KernelParameterDescriptor& newDesc = newSignature.at(i);
+        for (;i < numParams; i++) {
+          pKernelParams_->kernelParams[i] = (void *) malloc(newDesc.size_);
+          if (pKernelParams_->kernelParams[i] == nullptr) {
+            return hipErrorOutOfMemory;
+          }
+          ::memcpy(pKernelParams_->kernelParams[i], (params->kernelParams[i]), newDesc.size_);
+        }
+      }
+      // If the numParams of old func is greater than new func, free
+      else if ((numParams < numParams_) && (numParams != numParams_)) {
+        for (; i < numParams_; i++) {
+          if (pKernelParams_->kernelParams[i] != nullptr) {
+            free(pKernelParams_->kernelParams[i]);
+          }
+          pKernelParams_->kernelParams[i] = nullptr;
+        }
+      }
+      pKernelParams_->extra = params->extra;
+    }
+    // When params are passed as a part of 'extra', reallocate for updated func and its params
+    else if (params->extra != nullptr) {
+
+      pKernelParams_->extra[0] = params->extra[0];
+      size_t kernargs_size_new = *((size_t *)params->extra[3]);
+      size_t kernargs_size_old = *((size_t *)pKernelParams_->extra[3]);
+      if (kernargs_size_new != kernargs_size_old) {
+        pKernelParams_->extra[1] = (void *) realloc(pKernelParams_->extra[1], kernargs_size_new);
+        if (pKernelParams_->extra[1] == nullptr) {
+          return hipErrorOutOfMemory;
+        }
+      }
+      pKernelParams_->extra[2] = params->extra[2];
+      *((size_t *)pKernelParams_->extra[3]) = kernargs_size_new;
+      ::memcpy(pKernelParams_->extra[1], (params->extra[1]), kernargs_size_new);
+      pKernelParams_->extra[4] = params->extra[4];
+    }
+    numParams_ = numParams;
+    pKernelParams_->blockDim = params->blockDim;
+    pKernelParams_->func = params->func;
+    pKernelParams_->gridDim = params->gridDim;
+    pKernelParams_->sharedMemBytes = params->sharedMemBytes;
     return status;
+  }
+  hipError_t SetAttrParams(hipKernelNodeAttrID attr, const hipKernelNodeAttrValue* params) {
+    // updates kernel attr params
+    if (attr == hipKernelNodeAttributeAccessPolicyWindow) {
+      if (params->accessPolicyWindow.base_ptr == NULL) {
+        return hipErrorInvalidResourceHandle;
+      }
+      kernelAttr_.accessPolicyWindow.base_ptr = params->accessPolicyWindow.base_ptr;
+      kernelAttr_.accessPolicyWindow.hitProp = params->accessPolicyWindow.hitProp;
+      kernelAttr_.accessPolicyWindow.hitRatio = params->accessPolicyWindow.hitRatio;
+      kernelAttr_.accessPolicyWindow.missProp = params->accessPolicyWindow.missProp;
+      kernelAttr_.accessPolicyWindow.num_bytes = params->accessPolicyWindow.num_bytes;
+    } else if (attr == hipKernelNodeAttributeCooperative)
+    {
+      kernelAttr_.cooperative = params->cooperative;
+    }
+    return hipSuccess;
+  }
+  hipError_t GetAttrParams(hipKernelNodeAttrID attr, hipKernelNodeAttrValue* params) {
+    // Get kernel attr params
+    if (attr == hipKernelNodeAttributeAccessPolicyWindow) {
+      if (kernelAttr_.accessPolicyWindow.base_ptr == NULL) {
+        return hipErrorInvalidResourceHandle;
+      }
+      params->accessPolicyWindow.base_ptr = kernelAttr_.accessPolicyWindow.base_ptr;
+      params->accessPolicyWindow.hitProp = kernelAttr_.accessPolicyWindow.hitProp;
+      params->accessPolicyWindow.hitRatio = kernelAttr_.accessPolicyWindow.hitRatio;
+      params->accessPolicyWindow.missProp = kernelAttr_.accessPolicyWindow.missProp;
+      params->accessPolicyWindow.num_bytes = kernelAttr_.accessPolicyWindow.num_bytes;
+    } else if (attr == hipKernelNodeAttributeCooperative)
+    {
+      params->cooperative = kernelAttr_.cooperative;
+    }
+    return hipSuccess;
   }
   // ToDo: use this when commands are cloned and command params are to be updated
   hipError_t SetCommandParams(const hipKernelNodeParams* params) {
@@ -604,7 +810,7 @@ class hipGraphMemcpyNode1D : public hipGraphNode {
 
  public:
   hipGraphMemcpyNode1D(void* dst, const void* src, size_t count, hipMemcpyKind kind,
-                       hipGraphNodeType type = hipGraphNodeTypeMemcpy1D)
+                       hipGraphNodeType type = hipGraphNodeTypeMemcpy)
       : hipGraphNode(type), dst_(dst), src_(src), count_(count), kind_(kind) {}
 
   ~hipGraphMemcpyNode1D() {}
@@ -699,7 +905,7 @@ class hipGraphMemcpyNodeFromSymbol : public hipGraphMemcpyNode1D {
                        hipMemcpyKind kind) {
     size_t sym_size = 0;
     hipDeviceptr_t device_ptr = nullptr;
-    //check to see if dst is also a symbol (cuda negative test case)
+    // check to see if dst is also a symbol (cuda negative test case)
     hipError_t status = ihipMemcpySymbol_validate(dst, count, offset, sym_size, device_ptr);
     if (status == hipSuccess) {
       return hipErrorInvalidValue;
@@ -711,11 +917,11 @@ class hipGraphMemcpyNodeFromSymbol : public hipGraphMemcpyNode1D {
 
     size_t dOffset = 0;
     amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
-    if( dstMemory == nullptr && kind != hipMemcpyHostToDevice) {
+    if (dstMemory == nullptr && kind != hipMemcpyHostToDevice) {
       return hipErrorInvalidMemcpyDirection;
-    } else if ( dstMemory != nullptr && kind != hipMemcpyDeviceToDevice) {
+    } else if (dstMemory != nullptr && kind != hipMemcpyDeviceToDevice) {
       return hipErrorInvalidMemcpyDirection;
-    } else if ( kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToHost) {
+    } else if (kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToHost) {
       return hipErrorInvalidMemcpyDirection;
     }
 
@@ -787,10 +993,9 @@ class hipGraphMemcpyNodeToSymbol : public hipGraphMemcpyNode1D {
 
   hipError_t SetParams(const void* symbol, const void* src, size_t count, size_t offset,
                        hipMemcpyKind kind) {
-
     size_t sym_size = 0;
     hipDeviceptr_t device_ptr = nullptr;
-    //check to see if src is also a symbol (cuda negative test case)
+    // check to see if src is also a symbol (cuda negative test case)
     hipError_t status = ihipMemcpySymbol_validate(src, count, offset, sym_size, device_ptr);
     if (status == hipSuccess) {
       return hipErrorInvalidValue;
@@ -801,7 +1006,7 @@ class hipGraphMemcpyNodeToSymbol : public hipGraphMemcpyNode1D {
     }
     size_t dOffset = 0;
     amd::Memory* srcMemory = getMemoryObject(src, dOffset);
-    if(srcMemory == nullptr && kind != hipMemcpyHostToDevice) {
+    if (srcMemory == nullptr && kind != hipMemcpyHostToDevice) {
       return hipErrorInvalidValue;
     } else if (srcMemory != nullptr && kind != hipMemcpyDeviceToDevice) {
       return hipErrorInvalidValue;
@@ -876,7 +1081,6 @@ class hipGraphMemsetNode : public hipGraphNode {
     std::memcpy(params, pMemsetParams_, sizeof(hipMemsetParams));
   }
   hipError_t SetParams(const hipMemsetParams* params) {
-
     hipError_t hip_error = hipSuccess;
     hip_error = ihipGraphMemsetParams_validate(params);
     if (hip_error != hipSuccess) {
@@ -887,9 +1091,9 @@ class hipGraphMemsetNode : public hipGraphNode {
                                       params->width * params->elementSize);
     } else {
       auto sizeBytes = params->width * params->height * 1;
-      hip_error = ihipMemset3D_validate(
-          {params->dst, params->pitch, params->width, params->height},
-          params->value, {params->width, params->height, 1}, sizeBytes);
+      hip_error =
+        ihipMemset3D_validate({params->dst, params->pitch, params->width, params->height},
+                              params->value, {params->width, params->height, 1}, sizeBytes);
     }
 
     if (hip_error != hipSuccess) {

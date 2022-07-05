@@ -395,18 +395,24 @@ hipError_t hipDeviceGetLimit ( size_t* pValue, hipLimit_t limit ) {
 
   HIP_INIT_API(hipDeviceGetLimit, pValue, limit);
 
-  if(pValue == nullptr) {
+  if (pValue == nullptr || limit >= hipLimitRange) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if(limit == hipLimitMallocHeapSize) {
-    hipDeviceProp_t prop;
-    HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, ihipGetDevice()));
 
-    *pValue = prop.totalGlobalMem;
-    HIP_RETURN(hipSuccess);
-  } else {
-    HIP_RETURN(hipErrorUnsupportedLimit);
+  switch (limit) {
+    case hipLimitMallocHeapSize:
+      hipDeviceProp_t prop;
+      HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, ihipGetDevice()));
+      *pValue = prop.totalGlobalMem;
+      break;
+    case hipLimitStackSize:
+      *pValue = hip::getCurrentDevice()->devices()[0]->StackSize();
+      break;
+    default:
+      LogPrintfError("UnsupportedLimit = %d is passed", limit);
+      HIP_RETURN(hipErrorUnsupportedLimit);
   }
+  HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipDeviceGetPCIBusId ( char* pciBusId, int  len, int  device ) {
@@ -459,11 +465,26 @@ hipError_t hipDeviceSetCacheConfig ( hipFuncCache_t cacheConfig ) {
 
   // No way to set cache config yet.
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(hipErrorNotSupported);
 }
 
 hipError_t hipDeviceSetLimit ( hipLimit_t limit, size_t value ) {
-  HIP_RETURN(hipErrorNotSupported);
+  HIP_INIT_API(hipDeviceSetLimit, limit, value);
+  if (limit >= hipLimitRange) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  switch(limit) {
+  case hipLimitStackSize :
+    // need to query device size and take action
+    if (!hip::getCurrentDevice()->devices()[0]->UpdateStackSize(value)) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    break;
+  default:
+    LogPrintfError("UnsupportedLimit = %d is passed", limit);
+    HIP_RETURN(hipErrorUnsupportedLimit);
+  }
+  HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipDeviceSetSharedMemConfig ( hipSharedMemConfig config ) {
@@ -471,7 +492,7 @@ hipError_t hipDeviceSetSharedMemConfig ( hipSharedMemConfig config ) {
 
   // No way to set cache config yet.
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(hipErrorNotSupported);
 }
 
 hipError_t hipDeviceSynchronize ( void ) {
@@ -514,7 +535,7 @@ hipError_t hipGetDevice ( int* deviceId ) {
 }
 
 hipError_t hipGetDeviceCount ( int* count ) {
-  HIP_INIT_API(hipGetDeviceCount, count);
+  HIP_INIT_API_NO_RETURN(hipGetDeviceCount, count);
 
   HIP_RETURN(ihipDeviceGetCount(count));
 }

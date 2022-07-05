@@ -215,17 +215,15 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* queue,
   if (command == nullptr) {
     int32_t releaseFlags = ((ext_flags == 0) ? flags : ext_flags) &
                             (hipEventReleaseToSystem | hipEventReleaseToDevice);
-    bool markerTs = true;
     if (releaseFlags & hipEventReleaseToDevice) {
       releaseFlags = amd::Device::kCacheStateAgent;
     } else if (releaseFlags & hipEventReleaseToSystem) {
       releaseFlags = amd::Device::kCacheStateSystem;
     } else {
       releaseFlags = amd::Device::kCacheStateIgnore;
-      markerTs = false;
     }
     // Always submit a EventMarker.
-    command = new hip::EventMarker(*queue, !kMarkerDisableFlush, markerTs, releaseFlags);
+    command = new hip::EventMarker(*queue, !kMarkerDisableFlush, true, releaseFlags);
   }
   return hipSuccess;
 }
@@ -263,7 +261,10 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   const unsigned releaseFlags = (hipEventReleaseToDevice | hipEventReleaseToSystem);
   // can't set any unsupported flags.
   // can't set both release flags
-  const bool illegalFlags = (flags & ~supportedFlags) || (flags & releaseFlags) == releaseFlags;
+  // if hipEventInterprocess flag is set, then hipEventDisableTiming flag also must be set
+  const bool illegalFlags = (flags & ~supportedFlags) ||
+                            ((flags & releaseFlags) == releaseFlags) ||
+                            ((flags & hipEventInterprocess) && !(flags & hipEventDisableTiming));
   if (!illegalFlags) {
     hip::Event* e = nullptr;
     if (flags & hipEventInterprocess) {

@@ -75,10 +75,10 @@ typedef struct ihipIpcEventHandle_st {
 const char* ihipGetErrorName(hipError_t hip_error);
 
 static  amd::Monitor g_hipInitlock{"hipInit lock"};
-#define HIP_INIT() {\
+#define HIP_INIT(noReturn) {\
     amd::ScopedLock lock(g_hipInitlock);                     \
     if (!amd::Runtime::initialized()) {                      \
-      if (!hip::init()) {                                    \
+      if (!hip::init() && !noReturn) {                       \
         HIP_RETURN(hipErrorInvalidDevice);                   \
       }                                                      \
     }                                                        \
@@ -108,21 +108,21 @@ static  amd::Monitor g_hipInitlock{"hipInit lock"};
   ClPrint(amd::LOG_INFO, amd::LOG_API, "%s: Returned %s : %s",                     \
           __func__, ihipGetErrorName(err), ToString( __VA_ARGS__ ).c_str());
 
-  #define HIP_INIT_API_NO_RETURN(cid, ...)                  \
-  HIP_API_PRINT(__VA_ARGS__)                                \
-  amd::Thread* thread = amd::Thread::current();             \
-  VDI_CHECK_THREAD(thread);                                 \
-  HIP_INIT_VOID()
+#define HIP_INIT_API_INTERNAL(noReturn, cid, ...)            \
+  HIP_API_PRINT(__VA_ARGS__)                                 \
+  amd::Thread* thread = amd::Thread::current();              \
+  if (!VDI_CHECK_THREAD(thread) && !noReturn) {              \
+    HIP_RETURN(hipErrorOutOfMemory);                         \
+  }                                                          \
+  HIP_INIT(noReturn)                                         \
+  HIP_CB_SPAWNER_OBJECT(cid);
 
 // This macro should be called at the beginning of every HIP API.
 #define HIP_INIT_API(cid, ...)                               \
-  HIP_API_PRINT(__VA_ARGS__)                                 \
-  amd::Thread* thread = amd::Thread::current();              \
-  if (!VDI_CHECK_THREAD(thread)) {                           \
-    HIP_RETURN(hipErrorOutOfMemory);                         \
-  }                                                          \
-  HIP_INIT()                                                 \
-  HIP_CB_SPAWNER_OBJECT(cid);
+  HIP_INIT_API_INTERNAL(0, cid, __VA_ARGS__)
+
+#define HIP_INIT_API_NO_RETURN(cid, ...)                     \
+  HIP_INIT_API_INTERNAL(1, cid, __VA_ARGS__)
 
 #define HIP_RETURN_DURATION(ret, ...)                        \
   hip::g_lastError = ret;                                    \
@@ -468,6 +468,8 @@ namespace hip {
   int getDeviceID(amd::Context& ctx);
   /// Check if stream is valid
   extern bool isValid(hipStream_t& stream);
+  extern amd::Monitor hipArraySetLock;
+  extern std::unordered_set<hipArray*> hipArraySet;
 };
 
 extern void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_data);
@@ -510,5 +512,4 @@ extern std::vector<hip::Stream*> g_captureStreams;
 extern amd::Monitor g_captureStreamsLock;
 extern thread_local std::vector<hip::Stream*> l_captureStreams;
 extern thread_local hipStreamCaptureMode l_streamCaptureMode;
-
 #endif // HIP_SRC_HIP_INTERNAL_H

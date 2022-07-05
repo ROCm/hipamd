@@ -42,7 +42,7 @@ RTCProgram::RTCProgram(std::string name) : name_(name) {
 bool RTCProgram::findIsa() {
   const char* libName;
 #ifdef _WIN32
-  libName = "libamdhip64.dll";
+  libName = "amdhip64.dll";
 #else
   libName = "libamdhip64.so";
 #endif
@@ -52,6 +52,7 @@ bool RTCProgram::findIsa() {
   if (!handle) {
     LogInfo("hip runtime failed to load using dlopen");
     build_log_ +=
+        "hip runtime failed to load.\n"
         "Error: Please provide architecture for which code is to be "
         "generated.\n";
     return false;
@@ -63,6 +64,7 @@ bool RTCProgram::findIsa() {
   if (sym_hipGetDevice == nullptr || sym_hipGetDeviceProperties == nullptr) {
     LogInfo("ISA cannot be found to dlsym failure");
     build_log_ +=
+        "ISA cannot be found from hip runtime.\n"
         "Error: Please provide architecture for which code is to be "
         "generated.\n";
     return false;
@@ -92,7 +94,7 @@ bool RTCProgram::findIsa() {
 }
 
 //RTC Compile Program Member Functions
-RTCCompileProgram::RTCCompileProgram(std::string name_) : RTCProgram(name_) {
+RTCCompileProgram::RTCCompileProgram(std::string name_) : RTCProgram(name_), fgpu_rdc_(false) {
 
   if ((amd::Comgr::create_data_set(&compile_input_) != AMD_COMGR_STATUS_SUCCESS) ||
       (amd::Comgr::create_data_set(&link_input_) != AMD_COMGR_STATUS_SUCCESS)) {
@@ -227,13 +229,15 @@ bool RTCCompileProgram::transformOptions() {
 
 amd::Monitor RTCProgram::lock_("HIPRTC Program", true);
 
-bool RTCCompileProgram::compile(const std::vector<std::string>& options) {
+bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fgpu_rdc) {
   amd::ScopedLock lock(lock_); // Lock, because LLVM is not multi threaded
 
   if (!addSource_impl()) {
     LogError("Error in hiprtc: unable to add source code");
     return false;
   }
+
+  fgpu_rdc_ = fgpu_rdc;
 
   // Append compile options
   compile_options_.reserve(compile_options_.size() + options.size());
@@ -244,14 +248,17 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options) {
     return false;
   }
 
-  std::vector<char> LLVMBitcode;
-  if (!compileToBitCode(compile_input_, isa_, compile_options_, build_log_, LLVMBitcode)) {
+  if (!compileToBitCode(compile_input_, isa_, compile_options_, build_log_, LLVMBitcode_)) {
     LogError("Error in hiprtc: unable to compile source to bitcode");
     return false;
   }
 
+  if (fgpu_rdc_) {
+    return true;
+  }
+
   std::string linkFileName = "linked";
-  if (!addCodeObjData(link_input_, LLVMBitcode, linkFileName, AMD_COMGR_DATA_KIND_BC)) {
+  if (!addCodeObjData(link_input_, LLVMBitcode_, linkFileName, AMD_COMGR_DATA_KIND_BC)) {
     LogError("Error in hiprtc: unable to add linked code object");
     return false;
   }
@@ -281,25 +288,21 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options) {
   }
 
   std::vector<std::string> mangledNames;
-  if (!fillDemangledNames(executable_, mangledNames)) {
-    LogError("Error in hiprtc: unable to fill demangled names");
+  if (!fillMangledNames(executable_, mangledNames)) {
+    LogError("Error in hiprtc: unable to fill mangled names");
     return false;
   }
 
-  if (!getMangledNames(mangledNames, stripped_names_, demangled_names_)) {
-    LogError("Error in hiprtc: unable to get mangled names");
+  if (!getDemangledNames(mangledNames, demangled_names_)) {
+    LogError("Error in hiprtc: unable to get demangled names");
     return false;
   }
 
   return true;
 }
 
-bool RTCCompileProgram::trackMangledName(std::string& name) {
-  amd::ScopedLock lock(lock_);
+void RTCCompileProgram::stripNamedExpression(std::string& strippedName) {
 
-  if (name.size() == 0) return false;
-
-  std::string strippedName = name;
   if (strippedName.back() == ')') {
     strippedName.pop_back();
     strippedName.erase(0, strippedName.find('('));
@@ -307,16 +310,24 @@ bool RTCCompileProgram::trackMangledName(std::string& name) {
   if (strippedName.front() == '&') {
     strippedName.erase(0, 1);
   }
-
-  std::string strippedNameNoSpace = strippedName;
-  strippedNameNoSpace.erase(std::remove_if(strippedNameNoSpace.begin(),
-                                           strippedNameNoSpace.end(),
+  // Removes the spaces from strippedName if present
+  strippedName.erase(std::remove_if(strippedName.begin(),
+                                           strippedName.end(),
                                            [](unsigned char c) {
                                              return std::isspace(c);
-                                           }), strippedNameNoSpace.end());
+                                           }), strippedName.end());
+}
+
+bool RTCCompileProgram::trackMangledName(std::string& name) {
+  amd::ScopedLock lock(lock_);
+
+  if (name.size() == 0) return false;
+
+  std::string strippedNameNoSpace = name;
+  stripNamedExpression(strippedNameNoSpace);
 
   stripped_names_.insert(std::pair<std::string, std::string>(name, strippedNameNoSpace));
-  demangled_names_.insert(std::pair<std::string, std::string>(strippedName, ""));
+  demangled_names_.insert(std::pair<std::string, std::string>(strippedNameNoSpace, ""));
 
   const auto var{"__hiprtc_" + std::to_string(stripped_names_.size())};
   const auto code{"\nextern \"C\" constexpr auto " + var + " = " + name + ";\n"};
@@ -325,25 +336,38 @@ bool RTCCompileProgram::trackMangledName(std::string& name) {
   return true;
 }
 
-bool RTCCompileProgram::getDemangledName(const char* name_expression, const char** loweredName) {
-  std::string name = name_expression;
-  if (auto res = stripped_names_.find(name); res != stripped_names_.end()) {
-    if (auto dres = demangled_names_.find(res->second); dres != demangled_names_.end()) {
-      if (dres->second.size() != 0) {
-        *loweredName = dres->second.c_str();
-        return true;
-      } else
-        return false;
-    }
-  }
-  if (auto dres = demangled_names_.find(name); dres != demangled_names_.end()) {
+bool RTCCompileProgram::getMangledName(const char* name_expression, const char** loweredName) {
+
+  std::string strippedName = name_expression;
+  stripNamedExpression(strippedName);
+
+  if (auto dres = demangled_names_.find(strippedName); dres != demangled_names_.end()) {
     if (dres->second.size() != 0) {
       *loweredName = dres->second.c_str();
       return true;
-    }
-    return false;
+    } else
+      return false;
   }
   return false;
+}
+
+bool RTCCompileProgram::GetBitcode(char* bitcode) {
+
+  if (!fgpu_rdc_ || LLVMBitcode_.size() <= 0) {
+    return false;
+  }
+
+  std::copy(LLVMBitcode_.begin(), LLVMBitcode_.end(), bitcode);
+  return true;
+}
+
+bool RTCCompileProgram::GetBitcodeSize(size_t* bitcode_size) {
+  if (!fgpu_rdc_ || LLVMBitcode_.size() <= 0) {
+    return false;
+  }
+
+  *bitcode_size = LLVMBitcode_.size();
+  return true;
 }
 
 //RTC Link Program Member Functions
@@ -383,13 +407,13 @@ bool RTCLinkProgram::AddLinkerOptions(unsigned int num_options, hiprtcJIT_option
         link_args_.info_log_ = (reinterpret_cast<char*>(options_vals_ptr[opt_idx]));
         break;
       case HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES:
-        link_args_.info_log_size_ = *(reinterpret_cast<size_t*>(options_vals_ptr[opt_idx]));
+        link_args_.info_log_size_ = (reinterpret_cast<size_t>(options_vals_ptr[opt_idx]));
         break;
       case HIPRTC_JIT_ERROR_LOG_BUFFER:
         link_args_.error_log_ = reinterpret_cast<char*>(options_vals_ptr[opt_idx]);
         break;
       case HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES:
-        link_args_.error_log_size_ = *(reinterpret_cast<size_t*>(options_vals_ptr[opt_idx]));
+        link_args_.error_log_size_ = (reinterpret_cast<size_t>(options_vals_ptr[opt_idx]));
         break;
       case HIPRTC_JIT_OPTIMIZATION_LEVEL:
         link_args_.optimization_level_

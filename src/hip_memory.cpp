@@ -27,6 +27,9 @@
 #include "platform/memory.hpp"
 #include "amdocl/cl_vk_amd.hpp"
 
+amd::Monitor hip::hipArraySetLock{"Guards global hipArray set"};
+std::unordered_set<hipArray*> hip::hipArraySet;
+
 // ================================================================================================
 amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
   amd::Memory *memObj = amd::MemObjMap::FindMemObj(ptr);
@@ -614,18 +617,30 @@ hipError_t ihipArrayDestroy(hipArray* array) {
   if (array == nullptr) {
     return hipErrorInvalidValue;
   }
-
+  {
+    amd::ScopedLock lock(hip::hipArraySetLock);
+    if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
+      return hipErrorContextIsDestroyed;
+    }
+  }
   cl_mem memObj = reinterpret_cast<cl_mem>(array->data);
   if (is_valid(memObj) == false) {
     return hipErrorInvalidValue;
   }
+
   for (auto& dev : g_devices) {
-    dev->NullStream()->finish();
+    amd::HostQueue* queue = dev->NullStream(true);
+    if (queue != nullptr) {
+      queue->finish();
+    }
   }
+
   as_amd(memObj)->release();
-
+  {
+    amd::ScopedLock lock(hip::hipArraySetLock);
+    hip::hipArraySet.erase(array);
+  }
   delete array;
-
   return hipSuccess;
 }
 
@@ -656,18 +671,27 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
 hipError_t hipMemGetInfo(size_t* free, size_t* total) {
   HIP_INIT_API(hipMemGetInfo, free, total);
 
-  size_t freeMemory[2];
-  amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if(device == nullptr) {
-    HIP_RETURN(hipErrorInvalidDevice);
-  }
-
-  if(!device->globalFreeMemory(freeMemory)) {
+  if (free == nullptr && total == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *free = freeMemory[0] * Ki;
-  *total = device->info().globalMemSize_;
+  size_t freeMemory[2];
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  if (device == nullptr) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  if (!device->globalFreeMemory(freeMemory)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (free != nullptr) {
+    *free = freeMemory[0] * Ki;
+  }
+
+  if (total != nullptr) {
+    *total = device->info().globalMemSize_;
+  }
 
   HIP_RETURN(hipSuccess);
 }
@@ -709,6 +733,10 @@ hipError_t ihipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t heigh
   }
   size_t offset = 0; //this is ignored
   amd::Memory* memObj = getMemoryObject(*ptr, offset);
+  memObj->getUserData().pitch_ = *pitch;
+  memObj->getUserData().width_ = width;
+  memObj->getUserData().height_ = height;
+  memObj->getUserData().depth_ = depth;
   //saves the current device id so that it can be accessed later
   memObj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
 
@@ -904,8 +932,11 @@ hipError_t ihipArrayCreate(hipArray** array,
     return hipErrorInvalidValue;
   }
 
+  if (pAllocateArray->Flags & hipArrayCubemap) {
+    return hipErrorInvalidValue;
+  }
+
   if ((pAllocateArray->Flags & hipArraySurfaceLoadStore) ||
-      (pAllocateArray->Flags & hipArrayCubemap) ||
       (pAllocateArray->Flags & hipArrayTextureGather)) {
     return hipErrorNotSupported;
   }
@@ -946,7 +977,10 @@ hipError_t ihipArrayCreate(hipArray** array,
   (*array)->depth = pAllocateArray->Depth;
   (*array)->Format = pAllocateArray->Format;
   (*array)->NumChannels = pAllocateArray->NumChannels;
-
+  {
+    amd::ScopedLock lock(hip::hipArraySetLock);
+    hip::hipArraySet.insert(*array);
+  }
   return hipSuccess;
 }
 
@@ -1087,7 +1121,11 @@ hipError_t ihipHostUnregister(void* hostPtr) {
   if (mem != nullptr) {
     // Wait on the device, associated with the current memory object during allocation
     auto device_id = mem->getUserData().deviceId;
-    g_devices[device_id]->NullStream()->finish();
+
+    amd::HostQueue* queue = g_devices[device_id]->NullStream(true);
+    if (queue != nullptr) {
+      queue->finish();
+    }
 
     for (const auto& device: g_devices) {
       const device::Memory* devMem = mem->getDeviceMemory(*device->devices()[0]);
@@ -1104,7 +1142,7 @@ hipError_t ihipHostUnregister(void* hostPtr) {
   }
 
   LogPrintfError("Cannot unregister host_ptr: 0x%x \n", hostPtr);
-  return hipErrorHostMemoryNotRegistered;
+  return hipErrorInvalidValue;
 }
 
 
@@ -2151,7 +2189,7 @@ hipError_t hipMemcpy2DToArray(hipArray* dst, size_t wOffset, size_t hOffset, con
 
 hipError_t hipMemcpy2DToArray_spt(hipArray* dst, size_t wOffset, size_t hOffset, const void* src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind) {
   HIP_INIT_API(hipMemcpy2DToArray, dst, wOffset, hOffset, src, spitch, width, height, kind);
-  HIP_RETURN_DURATION(hipMemcpy2DToArray_common(dst, wOffset, hOffset, src, spitch, 
+  HIP_RETURN_DURATION(hipMemcpy2DToArray_common(dst, wOffset, hOffset, src, spitch,
                       width, height, kind, getPerThreadDefaultStream()));
 }
 
@@ -2583,6 +2621,11 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, int value, hipExte
   }
   if (sizeBytes > memory->getSize()) {
     return hipErrorInvalidValue;
+  }
+  if (pitchedDevPtr.pitch == memory->getUserData().pitch_) {
+    if (extent.height > memory->getUserData().height_) {
+       return hipErrorInvalidValue;
+    }
   }
   return hipSuccess;
 }
@@ -3380,7 +3423,10 @@ hipError_t ihipMipmappedArrayDestroy(hipMipmappedArray_t mipmapped_array_ptr) {
   }
 
   for (auto& dev : g_devices) {
-    dev->NullStream()->finish();
+    amd::HostQueue* queue = dev->NullStream(true);
+    if (queue != nullptr) {
+      queue->finish();
+    }
   }
 
   as_amd(mem_obj)->release();
