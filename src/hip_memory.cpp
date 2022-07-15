@@ -308,6 +308,7 @@ hipError_t ihipMemcpy_validate(void* dst, const void* src, size_t sizeBytes,
   if (dst == nullptr || src == nullptr) {
     return hipErrorInvalidValue;
   }
+
   size_t sOffset = 0;
   amd::Memory* srcMemory = getMemoryObject(src, sOffset);
   size_t dOffset = 0;
@@ -420,6 +421,9 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   status = ihipMemcpy_validate(dst, src, sizeBytes, kind);
   if (status != hipSuccess) {
     return status;
+  }
+  if (src == dst && kind == hipMemcpyDefault) {
+    return hipSuccess;
   }
   size_t sOffset = 0;
   amd::Memory* srcMemory = getMemoryObject(src, sOffset);
@@ -786,23 +790,28 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder,
                             const size_t imageRowPitch,
                             const size_t imageSlicePitch,
                             const uint32_t numMipLevels,
-                            amd::Memory* buffer) {
+                            amd::Memory* buffer,
+                            hipError_t& status) {
+  status = hipSuccess;
   const amd::Image::Format imageFormat({channelOrder, channelType});
   if (!imageFormat.isValid()) {
     LogPrintfError("Invalid Image format for channel Order:%u Type:%u \n", channelOrder,
                    channelType);
+    status = hipErrorInvalidValue;
     return nullptr;
   }
 
   amd::Context& context = *hip::getCurrentDevice()->asContext();
   if (!imageFormat.isSupported(context, imageType)) {
     LogPrintfError("Image type: %u not supported \n", imageType);
+    status = hipErrorInvalidValue;
     return nullptr;
   }
 
   const std::vector<amd::Device*>& devices = context.devices();
   if (!devices[0]->info().imageSupport_) {
     LogPrintfError("Device: 0x%x does not support image \n", devices[0]);
+    status = hipErrorInvalidValue;
     return nullptr;
   }
 
@@ -820,6 +829,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder,
                                       imageDepth,
                                       imageArraySize)) {
     DevLogError("Image does not have valid dimensions \n");
+    status = hipErrorInvalidValue;
     return nullptr;
   }
 
@@ -832,10 +842,12 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder,
 
       if (mip_levels < numMipLevels) {
         LogPrintfError("Invalid Mip Levels: %d", numMipLevels);
+        status = hipErrorInvalidValue;
         return nullptr;
       }
     } else {
       LogPrintfError("Mipmap not supported on one of the devices, Mip Level: %d", numMipLevels);
+      status = hipErrorInvalidValue;
       return nullptr;
     }
   }
@@ -906,11 +918,13 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder,
   }
 
   if (image == nullptr) {
+    status = hipErrorOutOfMemory;
     return nullptr;
   }
 
   if (!image->create(nullptr)) {
     LogPrintfError("Cannot create image: 0x%x \n", image);
+    status = hipErrorOutOfMemory;
     delete image;
     return nullptr;
   }
@@ -947,7 +961,7 @@ hipError_t ihipArrayCreate(hipArray** array,
                                                                pAllocateArray->Height,
                                                                pAllocateArray->Depth,
                                                                pAllocateArray->Flags);
-
+  hipError_t status = hipSuccess;
   amd::Image* image = ihipImageCreate(channelOrder,
                                       channelType,
                                       imageType,
@@ -959,10 +973,11 @@ hipError_t ihipArrayCreate(hipArray** array,
                                       0, /* row pitch */
                                       0, /* slice pitch */
                                       numMipmapLevels,
-                                      nullptr /* buffer */);
+                                      nullptr, /* buffer */
+                                      status);
 
   if (image == nullptr) {
-    return hipErrorInvalidValue;
+    return status;
   }
 
   cl_mem memObj = as_cl<amd::Memory>(image);
@@ -3375,6 +3390,7 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
                                                                 mipmapped_array_desc_ptr->Depth,
                                                                 mipmapped_array_desc_ptr->Flags);
 
+  hipError_t status = hipSuccess;
   // Create a new amd::Image with mipmap
   amd::Image* image = ihipImageCreate(channel_order,
                                       channel_type,
@@ -3386,10 +3402,11 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
                                       0 /* row pitch */,
                                       0 /* slice pitch */,
                                       num_mipmap_levels,
-                                      nullptr /* buffer */);
+                                      nullptr, /* buffer */
+                                      status);
 
   if (image == nullptr) {
-    return hipErrorInvalidValue;
+    return status;
   }
 
   cl_mem cl_mem_obj = as_cl<amd::Memory>(image);
