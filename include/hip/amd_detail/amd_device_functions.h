@@ -101,7 +101,7 @@ __device__  static int32_t __fns64(uint64_t mask, uint32_t base, int32_t offset)
   int32_t total = 0;
   for (int i = 0x20; i > 0; i >>= 1) {
     uint64_t temp_mask_lo = temp_mask & ((1ULL << i) - 1);
-    uint32_t pcnt = __builtin_popcountll(temp_mask_lo);
+    int32_t pcnt = __builtin_popcountll(temp_mask_lo);
     if (pcnt < temp_offset) {
       temp_mask = temp_mask >> i;
       temp_offset -= pcnt;
@@ -135,7 +135,7 @@ __device__ static int32_t __fns32(uint64_t mask, uint32_t base, int32_t offset) 
   int32_t total = 0;
   for (int i = 0x20; i > 0; i >>= 1) {
     uint64_t temp_mask_lo = temp_mask & ((1ULL << i) - 1);
-    uint32_t pcnt = __builtin_popcountll(temp_mask_lo);
+    int32_t pcnt = __builtin_popcountll(temp_mask_lo);
     if (pcnt < temp_offset) {
       temp_mask = temp_mask >> i;
       temp_offset -= pcnt;
@@ -426,15 +426,16 @@ __device__ static inline char4 __hip_hc_mul8pk(char4 in1, char4 in2) {
     return out;
 }
 
-/*
- * Rounding modes are not yet supported in HIP
- * TODO: Conversion functions are not correct, need to fix when BE is ready
-*/
-
-__device__ static inline float __double2float_rd(double x) { return (double)x; }
-__device__ static inline float __double2float_rn(double x) { return (double)x; }
-__device__ static inline float __double2float_ru(double x) { return (double)x; }
-__device__ static inline float __double2float_rz(double x) { return (double)x; }
+__device__ static inline float __double2float_rd(double x) {
+    return __ocml_cvtrtn_f32_f64(x);
+}
+__device__ static inline float __double2float_rn(double x) { return x; }
+__device__ static inline float __double2float_ru(double x) {
+    return __ocml_cvtrtp_f32_f64(x);
+}
+__device__ static inline float __double2float_rz(double x) {
+    return __ocml_cvtrtz_f32_f64(x);
+}
 
 __device__ static inline int __double2hiint(double x) {
     static_assert(sizeof(double) == 2 * sizeof(int), "");
@@ -586,10 +587,16 @@ __device__ static inline double __hiloint2double(int hi, int lo) {
 
 __device__ static inline double __int2double_rn(int x) { return (double)x; }
 
-__device__ static inline float __int2float_rd(int x) { return (float)x; }
+__device__ static inline float __int2float_rd(int x) {
+    return __ocml_cvtrtn_f32_s32(x);
+}
 __device__ static inline float __int2float_rn(int x) { return (float)x; }
-__device__ static inline float __int2float_ru(int x) { return (float)x; }
-__device__ static inline float __int2float_rz(int x) { return (float)x; }
+__device__ static inline float __int2float_ru(int x) {
+    return __ocml_cvtrtp_f32_s32(x);
+}
+__device__ static inline float __int2float_rz(int x) {
+    return __ocml_cvtrtz_f32_s32(x);
+}
 
 __device__ static inline float __int_as_float(int x) {
     static_assert(sizeof(float) == sizeof(int), "");
@@ -600,15 +607,27 @@ __device__ static inline float __int_as_float(int x) {
     return tmp;
 }
 
-__device__ static inline double __ll2double_rd(long long int x) { return (double)x; }
+__device__ static inline double __ll2double_rd(long long int x) {
+    return __ocml_cvtrtn_f64_s64(x);
+}
 __device__ static inline double __ll2double_rn(long long int x) { return (double)x; }
-__device__ static inline double __ll2double_ru(long long int x) { return (double)x; }
-__device__ static inline double __ll2double_rz(long long int x) { return (double)x; }
+__device__ static inline double __ll2double_ru(long long int x) {
+    return __ocml_cvtrtp_f64_s64(x);
+}
+__device__ static inline double __ll2double_rz(long long int x) {
+    return __ocml_cvtrtz_f64_s64(x);
+}
 
-__device__ static inline float __ll2float_rd(long long int x) { return (float)x; }
+__device__ static inline float __ll2float_rd(long long int x) {
+    return __ocml_cvtrtn_f32_s64(x);
+}
 __device__ static inline float __ll2float_rn(long long int x) { return (float)x; }
-__device__ static inline float __ll2float_ru(long long int x) { return (float)x; }
-__device__ static inline float __ll2float_rz(long long int x) { return (float)x; }
+__device__ static inline float __ll2float_ru(long long int x) {
+    return __ocml_cvtrtp_f32_s64(x);
+}
+__device__ static inline float __ll2float_rz(long long int x) {
+    return __ocml_cvtrtz_f32_s64(x);
+}
 
 __device__ static inline double __longlong_as_double(long long int x) {
     static_assert(sizeof(double) == sizeof(long long), "");
@@ -621,10 +640,16 @@ __device__ static inline double __longlong_as_double(long long int x) {
 
 __device__ static inline double __uint2double_rn(int x) { return (double)x; }
 
-__device__ static inline float __uint2float_rd(unsigned int x) { return (float)x; }
+__device__ static inline float __uint2float_rd(unsigned int x) {
+    return __ocml_cvtrtn_f32_u32(x);
+}
 __device__ static inline float __uint2float_rn(unsigned int x) { return (float)x; }
-__device__ static inline float __uint2float_ru(unsigned int x) { return (float)x; }
-__device__ static inline float __uint2float_rz(unsigned int x) { return (float)x; }
+__device__ static inline float __uint2float_ru(unsigned int x) {
+    return __ocml_cvtrtp_f32_u32(x);
+}
+__device__ static inline float __uint2float_rz(unsigned int x) {
+    return __ocml_cvtrtz_f32_u32(x);
+}
 
 __device__ static inline float __uint_as_float(unsigned int x) {
    static_assert(sizeof(float) == sizeof(unsigned int), "");
@@ -635,15 +660,27 @@ __device__ static inline float __uint_as_float(unsigned int x) {
     return tmp;
 }
 
-__device__ static inline double __ull2double_rd(unsigned long long int x) { return (double)x; }
+__device__ static inline double __ull2double_rd(unsigned long long int x) {
+    return __ocml_cvtrtn_f64_u64(x);
+}
 __device__ static inline double __ull2double_rn(unsigned long long int x) { return (double)x; }
-__device__ static inline double __ull2double_ru(unsigned long long int x) { return (double)x; }
-__device__ static inline double __ull2double_rz(unsigned long long int x) { return (double)x; }
+__device__ static inline double __ull2double_ru(unsigned long long int x) {
+    return __ocml_cvtrtp_f64_u64(x);
+}
+__device__ static inline double __ull2double_rz(unsigned long long int x) {
+    return __ocml_cvtrtz_f64_u64(x);
+}
 
-__device__ static inline float __ull2float_rd(unsigned long long int x) { return (float)x; }
+__device__ static inline float __ull2float_rd(unsigned long long int x) {
+    return __ocml_cvtrtn_f32_u64(x);
+}
 __device__ static inline float __ull2float_rn(unsigned long long int x) { return (float)x; }
-__device__ static inline float __ull2float_ru(unsigned long long int x) { return (float)x; }
-__device__ static inline float __ull2float_rz(unsigned long long int x) { return (float)x; }
+__device__ static inline float __ull2float_ru(unsigned long long int x) {
+    return __ocml_cvtrtp_f32_u64(x);
+}
+__device__ static inline float __ull2float_rz(unsigned long long int x) {
+    return __ocml_cvtrtz_f32_u64(x);
+}
 
 #if __HIP_CLANG_ONLY__
 
@@ -653,7 +690,7 @@ __device__ long long int __clock();
 __device__ long long int clock64();
 __device__ long long int clock();
 // hip.amdgcn.bc - named sync
-__device__ void __named_sync(int a, int b);
+__device__ void __named_sync();
 
 #ifdef __HIP_DEVICE_COMPILE__
 
@@ -700,7 +737,7 @@ long long int  clock() { return __clock(); }
 // hip.amdgcn.bc - named sync
 __device__
 inline
-void __named_sync(int a, int b) { __builtin_amdgcn_s_barrier(); }
+void __named_sync() { __builtin_amdgcn_s_barrier(); }
 
 #endif // __HIP_DEVICE_COMPILE__
 
@@ -871,11 +908,7 @@ void __assert_fail(const char *assertion,
 }
 
 extern "C" __device__ __attribute__((noinline)) __attribute__((weak))
-void __assertfail(const char *assertion,
-                  const char *file,
-                  unsigned int line,
-                  const char *function,
-                  size_t charsize)
+void __assertfail()
 {
     // ignore all the args for now.
     __builtin_trap();

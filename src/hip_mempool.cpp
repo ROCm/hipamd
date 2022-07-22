@@ -61,10 +61,10 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
   if ((dev_ptr == nullptr) || (size == 0) || (!hip::isValid(stream))) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  auto device = reinterpret_cast<hip::Stream*>(stream)->GetDevice();
-  auto mem_pool = device->GetCurrentMemoryPool();
   auto hip_stream = (stream == nullptr) ? hip::getCurrentDevice()->GetNullStream() :
     reinterpret_cast<hip::Stream*>(stream);
+  auto device = hip_stream->GetDevice();
+  auto mem_pool = device->GetCurrentMemoryPool();
   *dev_ptr = reinterpret_cast<hip::MemoryPool*>(mem_pool)->AllocateMemory(size, hip_stream);
   HIP_RETURN(hipSuccess);
 }
@@ -102,7 +102,7 @@ hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold) {
 // ================================================================================================
 hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value) {
   HIP_INIT_API(hipMemPoolSetAttribute, mem_pool, attr, value);
-  if (mem_pool == nullptr) {
+  if (mem_pool == nullptr || value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto hip_mem_pool = reinterpret_cast<hip::MemoryPool*>(mem_pool);
@@ -112,7 +112,7 @@ hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, vo
 // ================================================================================================
 hipError_t hipMemPoolGetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value) {
   HIP_INIT_API(hipMemPoolGetAttribute, mem_pool, attr, value);
-  if (mem_pool == nullptr) {
+  if (mem_pool == nullptr || value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto hip_mem_pool = reinterpret_cast<hip::MemoryPool*>(mem_pool);

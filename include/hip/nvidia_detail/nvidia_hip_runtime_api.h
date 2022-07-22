@@ -33,7 +33,7 @@ THE SOFTWARE.
 #define CUDA_10010 10010
 #define CUDA_10020 10020
 #define CUDA_11010 11010
-#define CUDA_11010 11020
+#define CUDA_11020 11020
 #define CUDA_11030 11030
 #define CUDA_11040 11040
 
@@ -349,6 +349,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define HIP_LAUNCH_PARAM_END CU_LAUNCH_PARAM_END
 #define hipLimitPrintfFifoSize cudaLimitPrintfFifoSize
 #define hipLimitMallocHeapSize cudaLimitMallocHeapSize
+#define hipLimitStackSize      cudaLimitStackSize
 #define hipIpcMemLazyEnablePeerAccess cudaIpcMemLazyEnablePeerAccess
 
 #define hipOccupancyDefault cudaOccupancyDefault
@@ -1100,6 +1101,8 @@ typedef enum cudaGraphNodeType hipGraphNodeType;
 #define hipGraphNodeTypeEmpty cudaGraphNodeTypeEmpty
 #define hipGraphNodeTypeWaitEvent cudaGraphNodeTypeWaitEvent
 #define hipGraphNodeTypeEventRecord cudaGraphNodeTypeEventRecord
+#define hipGraphNodeTypeExtSemaphoreSignal cudaGraphNodeTypeExtSemaphoreSignal
+#define hipGraphNodeTypeExtSemaphoreWait  cudaGraphNodeTypeExtSemaphoreWait
 #define hipGraphNodeTypeMemcpyFromSymbol cudaGraphNodeTypeMemcpyFromSymbol
 #define hipGraphNodeTypeMemcpyToSymbol cudaGraphNodeTypeMemcpyToSymbol
 #define hipGraphNodeTypeCount cudaGraphNodeTypeCount
