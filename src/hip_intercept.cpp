@@ -25,50 +25,33 @@
 
 // HIP API callback/activity
 
-api_callbacks_table_t callbacks_table;
-
 extern const std::string& FunctionName(const hipFunction_t f);
 
-const char* hipKernelNameRef(const hipFunction_t f) { return FunctionName(f).c_str(); }
+extern "C" {
 
 int hipGetStreamDeviceId(hipStream_t stream) {
   if (!hip::isValid(stream)) {
     return -1;
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  return (s != nullptr)? s->DeviceId() : ihipGetDevice();
+  return (s != nullptr) ? s->DeviceId() : ihipGetDevice();
 }
 
-const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t) {
-  if (hostFunction == NULL) {
-    return NULL;
-  }
-  return PlatformState::instance().getStatFuncName(hostFunction);
+const char* hipKernelNameRef(const hipFunction_t function) {
+  return FunctionName(function).c_str();
 }
 
-hipError_t hipRegisterApiCallback(uint32_t id, void* fun, void* arg) {
-  return callbacks_table.set_callback(id, reinterpret_cast<api_callbacks_table_t::fun_t>(fun), arg) ?
-    hipSuccess : hipErrorInvalidValue;
+const char* hipKernelNameRefByPtr(const void* host_function, hipStream_t stream) {
+  [](auto&&...) {}(stream);
+  return (host_function != nullptr) ? PlatformState::instance().getStatFuncName(host_function)
+                                    : nullptr;
 }
 
-hipError_t hipRemoveApiCallback(uint32_t id) {
-  return callbacks_table.set_callback(id, NULL, NULL) ? hipSuccess : hipErrorInvalidValue;
+void hipRegisterTracerCallback(int (*function)(activity_domain_t domain, uint32_t operation_id,
+                                               void* data)) {
+  activity_prof::report_activity.store(function, std::memory_order_relaxed);
 }
 
-hipError_t hipRegisterActivityCallback(uint32_t id, void* fun, void* arg) {
-  return callbacks_table.set_activity(id, reinterpret_cast<api_callbacks_table_t::act_t>(fun), arg) ?
-    hipSuccess : hipErrorInvalidValue;
-}
+const char* hipApiName(uint32_t id) { return hip_api_name(id); }
 
-hipError_t hipRemoveActivityCallback(uint32_t id) {
-  return callbacks_table.set_activity(id, NULL, NULL) ? hipSuccess : hipErrorInvalidValue;
-}
-
-hipError_t hipEnableTracing(bool enabled) {
-  callbacks_table.set_enabled(enabled);
-  return hipSuccess;
-}
-
-const char* hipApiName(uint32_t id) {
-  return hip_api_name(id);
-}
+}  // extern "C"

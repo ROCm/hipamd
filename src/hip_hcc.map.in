@@ -187,10 +187,6 @@ global:
     hipSetupArgument;
     hipLaunchByPtr;
     hipLaunchKernel;
-    hipRegisterApiCallback;
-    hipRemoveApiCallback;
-    hipRegisterActivityCallback;
-    hipRemoveActivityCallback;
     hipApiName;
     hipKernelNameRef;
     hipKernelNameRefByPtr;
@@ -272,8 +268,6 @@ global:
     hipDestroySurfaceObject*;
     hipHccModuleLaunchKernel*;
     hipExtModuleLaunchKernel*;
-    hipInitActivityCallback*;
-    hipEnableActivityCallback*;
     hipGetCmdName*;
     hipExtStreamCreateWithCUMask;
     hipStreamGetPriority;
@@ -500,6 +494,7 @@ global:
     hipUserObjectRetain;
     hipGraphRetainUserObject;
     hipGraphReleaseUserObject;
+    hipRegisterTracerCallback;
 local:
     *;
 } hip_5.2;

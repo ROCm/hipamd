@@ -26,7 +26,7 @@ import filecmp
 
 PROF_HEADER = "hip_prof_str.h"
 OUTPUT = PROF_HEADER
-REC_MAX_LEN = 1024
+REC_MAX_LEN = 4096
 
 # Recursive sources processing
 recursive_mode = 0
@@ -474,6 +474,7 @@ def generate_prof_header(f, api_map, callback_ids, opts_map):
       f.write('    } ' + name + ';\n')
   f.write(
   '  } args;\n' +
+  '  uint64_t *phase_data;\n' +
   '} hip_api_data_t;\n'
   )
 

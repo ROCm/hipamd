@@ -19,17 +19,8 @@
  THE SOFTWARE. */
 
 #include "platform/activity.hpp"
-
-extern "C" void hipInitActivityCallback(void* id_callback, void* op_callback, void* arg) {
-  activity_prof::CallbacksTable::init(reinterpret_cast<activity_prof::id_callback_fun_t>(id_callback),
-                                      reinterpret_cast<activity_prof::callback_fun_t>(op_callback),
-                                      arg);
-}
-
-extern "C" bool hipEnableActivityCallback(unsigned op, bool enable) {
-  return activity_prof::CallbacksTable::SetEnabled(op, enable);
-}
+#include <hip/hip_runtime_api.h>
 
 extern "C" const char* hipGetCmdName(unsigned op) {
-  return getOclCommandKindString(static_cast<uint32_t>(op));
+  return getOclCommandKindString(static_cast<cl_command_type>(op));
 }
