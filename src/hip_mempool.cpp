@@ -134,6 +134,9 @@ hipError_t hipMemPoolSetAccess(
       if (desc_list[i].location.id >= g_devices.size()) {
         HIP_RETURN(hipErrorInvalidValue);
       }
+      if (desc_list[i].flags > hipMemAccessFlagsProtReadWrite) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
       auto device = g_devices[desc_list[i].location.id];
       hip_mem_pool->SetAccess(device, desc_list[i].flags);
     } else {
@@ -169,6 +172,10 @@ hipError_t hipMemPoolGetAccess(
 hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_props) {
   HIP_INIT_API(hipMemPoolCreate, mem_pool, pool_props);
   if (mem_pool == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  // validate hipMemAllocationType value
+  if (pool_props->allocType != hipMemAllocationTypePinned) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   // Make sure the pool creation occurs on a valid device

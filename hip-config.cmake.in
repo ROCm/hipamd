@@ -112,15 +112,25 @@ if(WIN32)
     set(HIP_PATH ${PACKAGE_PREFIX_DIR})
   endif()
 else()
-  # Linux - set a default path for ROCM_PATH
-  if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH /opt/rocm)
-  endif()
-
-  #If HIP is not installed under ROCm, need this to find HSA assuming HSA is under ROCm
+  # Linux
+  # If HIP is not installed under ROCm, need this to find HSA assuming HSA is under ROCm
   if(DEFINED ENV{ROCM_PATH})
     set(ROCM_PATH "$ENV{ROCM_PATH}")
   endif()
+
+  # set a default path for ROCM_PATH
+  if(NOT DEFINED ROCM_PATH)
+    # TODO:once file reorg backward compatibility is turned off,
+    # ROCM_PATH can be set to PACKAGE_PREFIX_DIR.
+    # Time being find the ROCM_PATH based on hip-config file
+    # Get the ROCM PATH in 2 steps as get_filename_component appears to process /../ textually
+    # first find the real path to hip-config file which doesn't have symbolic links
+    # Real Path : /opt/rocm-ver/lib/cmake/hip/hip-config.cmake
+    # then go up 4 levels get to /opt/rocm-ver
+    get_filename_component(CONFIG_PATH "${CMAKE_CURRENT_LIST_FILE}" REALPATH)
+    get_filename_component(ROCM_PATH "${CONFIG_PATH}/../../../../" ABSOLUTE)
+  endif()
+
 endif()
 
 if(HIP_COMPILER STREQUAL "clang")
@@ -187,8 +197,7 @@ if(NOT WIN32)
   find_dependency(Threads)
 endif()
 
-#get_filename_component cannot resolve the symlinks if called from /opt/rocm/lib/hip
-#and do three level up again
+# From hip config directory, do three level up
 get_filename_component(_DIR "${CMAKE_CURRENT_LIST_DIR}" REALPATH)
 get_filename_component(_IMPORT_PREFIX "${_DIR}/../../../" REALPATH)
 

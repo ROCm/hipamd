@@ -343,7 +343,10 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                startEvent, stopEvent, flags, params);
 
   int deviceId = hip::Stream::DeviceId(hStream);
-  HIP_RETURN_ONFAIL(PlatformState::instance().initStatManagedVarDevicePtr(deviceId));
+  for (size_t dev = 0; dev < g_devices.size(); ++dev) {
+    HIP_RETURN_ONFAIL(PlatformState::instance().initStatManagedVarDevicePtr(dev));
+  }
+  
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidImage;
@@ -416,6 +419,10 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
   HIP_INIT_API(hipExtModuleLaunchKernel, f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
                localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream,
                kernelParams, extra, startEvent, stopEvent, flags);
+
+  STREAM_CAPTURE(hipExtModuleLaunchKernel, hStream, f, globalWorkSizeX, globalWorkSizeY,
+                 globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,
+                 kernelParams, extra, startEvent, stopEvent, flags);
 
   HIP_RETURN(ihipModuleLaunchKernel(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
                                     localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,

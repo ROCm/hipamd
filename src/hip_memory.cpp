@@ -627,6 +627,8 @@ hipError_t ihipArrayDestroy(hipArray* array) {
     amd::ScopedLock lock(hip::hipArraySetLock);
     if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
       return hipErrorContextIsDestroyed;
+    } else {
+      hip::hipArraySet.erase(array);
     }
   }
   cl_mem memObj = reinterpret_cast<cl_mem>(array->data);
@@ -642,10 +644,6 @@ hipError_t ihipArrayDestroy(hipArray* array) {
   }
 
   as_amd(memObj)->release();
-  {
-    amd::ScopedLock lock(hip::hipArraySetLock);
-    hip::hipArraySet.erase(array);
-  }
   delete array;
   return hipSuccess;
 }
@@ -678,7 +676,7 @@ hipError_t hipMemGetInfo(size_t* free, size_t* total) {
   HIP_INIT_API(hipMemGetInfo, free, total);
 
   if (free == nullptr && total == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipSuccess);
   }
 
   size_t freeMemory[2];
@@ -1063,6 +1061,9 @@ hipError_t hipMalloc3DArray(hipArray_t* array,
                                           hip::getArrayFormat(*desc),
                                           hip::getNumChannels(*desc),
                                           flags};
+  if(!hip::CheckArrayFormat(*desc)) {
+    return hipErrorInvalidValue;
+  }
 
   HIP_RETURN(ihipArrayCreate(array, &allocateArray, 0));
 }
@@ -1093,7 +1094,7 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 }
 
 hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
-  if (hostPtr == nullptr || sizeBytes == 0) {
+  if (hostPtr == nullptr || sizeBytes == 0 || flags > 15) {
     return hipErrorInvalidValue;
   } else {
     amd::Memory* mem = new (*hip::host_device->asContext()) amd::Buffer(*hip::host_device->asContext(),
@@ -1135,6 +1136,9 @@ hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) 
 }
 
 hipError_t ihipHostUnregister(void* hostPtr) {
+  if (hostPtr == nullptr) {
+    return hipErrorInvalidValue;
+  }
   size_t offset = 0;
   amd::Memory* mem = getMemoryObject(hostPtr, offset);
 
@@ -1162,7 +1166,7 @@ hipError_t ihipHostUnregister(void* hostPtr) {
   }
 
   LogPrintfError("Cannot unregister host_ptr: 0x%x \n", hostPtr);
-  return hipErrorInvalidValue;
+  return hipErrorHostMemoryNotRegistered;
 }
 
 
@@ -2544,7 +2548,8 @@ hipError_t ihipMemset_validate(void* dst, int64_t value, size_t valueSize,
     // dst ptr is host ptr hence error
     return hipErrorInvalidValue;
   }
-  if (memory->getSize() < (offset + sizeBytes)) {
+  // Return error if sizeBytes passed to memcpy is more than the actual size allocated
+  if (sizeBytes > (memory->getSize() - offset)){
     return hipErrorInvalidValue;
   }
   return hipSuccess;
@@ -2595,7 +2600,18 @@ hipError_t ihipMemset(void* dst, int64_t value, size_t valueSize, size_t sizeByt
     if (hip_error != hipSuccess) {
       break;
     }
-
+    // This is required to comply with the spec
+    // spec says hipMemset will be asynchronous when destination memory is device memory
+    // and pointer is non-offseted
+    if (isAsync == false) {
+      size_t offset = 0;
+      amd::Memory* memObj = getMemoryObject(dst, offset);
+      auto flags = memObj->getMemFlags();
+      if (offset == 0 &&
+        !(flags & (CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS | CL_MEM_SVM_FINE_GRAIN_BUFFER))) {
+        isAsync = true;
+      }
+    }
     std::vector<amd::Command*> commands;
     amd::HostQueue* queue = hip::getQueue(stream);
     hip_error = ihipMemsetCommand(commands, dst, value, valueSize, sizeBytes, queue);
@@ -2702,7 +2718,8 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, int value, hipExte
   if (memory == nullptr) {
     return hipErrorInvalidValue;
   }
-  if ((sizeBytes + offset) > memory->getSize()) {
+  // Return error if sizeBytes passed to memcpy is more than the actual size allocated
+  if (sizeBytes > (memory->getSize() - offset)){
     return hipErrorInvalidValue;
   }
   if (pitchedDevPtr.pitch == memory->getUserData().pitch_) {
@@ -2754,6 +2771,18 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   hipError_t status = ihipMemset3D_validate(pitchedDevPtr, value, extent, sizeBytes);
   if (status != hipSuccess) {
     return status;
+  }
+  // This is required to comply with the spec
+  // spec says hipMemset will be asynchronous when destination memory is device memory
+  // and pointer is non-offseted
+  if (isAsync == false) {
+    size_t offset = 0;
+    amd::Memory* memObj = getMemoryObject(pitchedDevPtr.ptr, offset);
+    auto flags = memObj->getMemFlags();
+    if (offset == 0 &&
+      !(flags & (CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS | CL_MEM_SVM_FINE_GRAIN_BUFFER))) {
+      isAsync = true;
+    }
   }
   amd::HostQueue* queue = hip::getQueue(stream);
   std::vector<amd::Command*> commands;

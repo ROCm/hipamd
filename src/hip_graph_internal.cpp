@@ -53,6 +53,8 @@ std::unordered_set<ihipGraph*> ihipGraph::graphSet_;
 amd::Monitor ihipGraph::graphSetLock_{"Guards global graph set"};
 std::unordered_set<hipGraphExec*> hipGraphExec::graphExecSet_;
 amd::Monitor hipGraphExec::graphExecSetLock_{"Guards global exec graph set"};
+std::unordered_set<hipUserObject*> hipUserObject::ObjectSet_;
+amd::Monitor hipUserObject::UserObjectLock_{"Guards global user object"};
 
 hipError_t hipGraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t count,
                                                 hipMemcpyKind kind) {
@@ -635,7 +637,6 @@ void ihipGraph::LevelOrder(std::vector<Node>& levelOrder) {
 const ihipGraph* ihipGraph::getOriginalGraph() const {
   return pOriginalGraph_;
 }
-
 void ihipGraph::setOriginalGraph(const ihipGraph* pOriginalGraph) {
   pOriginalGraph_ = pOriginalGraph;
 }
@@ -688,7 +689,7 @@ hipError_t hipGraphExec::CreateQueues(size_t numQueues) {
   for (size_t i = 0; i < numQueues; i++) {
     amd::HostQueue* queue;
     cl_command_queue_properties properties =
-        (callbacks_table.is_enabled() || HIP_FORCE_QUEUE_PROFILING) ? CL_QUEUE_PROFILING_ENABLE : 0;
+        callbacks_table.is_enabled() ? CL_QUEUE_PROFILING_ENABLE : 0;
     queue = new amd::HostQueue(*hip::getCurrentDevice()->asContext(),
                                *hip::getCurrentDevice()->devices()[0], properties,
                                amd::CommandQueue::RealTimeDisabled, amd::CommandQueue::Priority::Normal);

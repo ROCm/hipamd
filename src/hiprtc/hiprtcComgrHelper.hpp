@@ -31,6 +31,8 @@ THE SOFTWARE.
 
 namespace hiprtc {
 namespace helpers {
+bool UnbundleBitCode(const std::vector<char>& bundled_bit_code, const std::string& isa,
+                    size_t& co_offset, size_t& co_size);
 bool addCodeObjData(amd_comgr_data_set_t& input, const std::vector<char>& source,
                     const std::string& name, const amd_comgr_data_kind_t type);
 bool extractBuildLog(amd_comgr_data_set_t dataSet, std::string& buildLog);
@@ -55,5 +57,6 @@ std::string handleMangledName(std::string loweredName);
 bool fillMangledNames(std::vector<char>& executable, std::vector<std::string>& mangledNames);
 bool getDemangledNames(const std::vector<std::string>& mangledNames,
                      std::map<std::string, std::string>& demangledNames);
+void GenerateUniqueFileName(std::string &name);
 }  // namespace helpers
 }  // namespace hiprtc

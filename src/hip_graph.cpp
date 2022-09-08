@@ -23,6 +23,7 @@
 #include "hip_conversions.hpp"
 #include "hip_platform.hpp"
 #include "hip_event.hpp"
+#include "top.hpp"
 
 std::vector<hip::Stream*> g_captureStreams;
 amd::Monitor g_captureStreamsLock{"StreamCaptureGlobalList"};
@@ -69,10 +70,17 @@ hipError_t ihipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                   const hipKernelNodeParams* pNodeParams) {
   if (pGraphNode == nullptr || graph == nullptr ||
       (numDependencies > 0 && pDependencies == nullptr) || pNodeParams == nullptr ||
-      pNodeParams->func == nullptr || pNodeParams->kernelParams == nullptr) {
+      pNodeParams->func == nullptr) {
     return hipErrorInvalidValue;
   }
+
   if (!ihipGraph::isGraphValid(graph)) {
+    return hipErrorInvalidValue;
+  }
+
+  // If neither 'kernelParams' or 'extra' are provided or if both are provided, return error
+  if ((pNodeParams->kernelParams == nullptr && pNodeParams->extra == nullptr) ||
+      (pNodeParams->kernelParams != nullptr && pNodeParams->extra != nullptr)) {
     return hipErrorInvalidValue;
   }
 
@@ -85,12 +93,6 @@ hipError_t ihipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   status = ihipValidateKernelParams(pNodeParams);
   if (hipSuccess != status) {
     return status;
-  }
-
-  // If neither 'kernelParams' or 'extra' are provided or if both are provided, return error
-  if ((pNodeParams->kernelParams == nullptr && pNodeParams->extra == nullptr) ||
-      (pNodeParams->kernelParams != nullptr) && (pNodeParams->extra != nullptr)) {
-    return hipErrorInvalidValue;
   }
 
   size_t globalWorkSizeX = static_cast<size_t>(pNodeParams->gridDim.x) * pNodeParams->blockDim.x;
@@ -200,6 +202,59 @@ hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction
     return status;
   }
   s->SetLastCapturedNode(pGraphNode);
+  return hipSuccess;
+}
+
+hipError_t capturehipExtModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f,
+                                           uint32_t& globalWorkSizeX, uint32_t& globalWorkSizeY,
+                                           uint32_t& globalWorkSizeZ, uint32_t& localWorkSizeX,
+                                           uint32_t& localWorkSizeY, uint32_t& localWorkSizeZ,
+                                           size_t& sharedMemBytes, void**& kernelParams,
+                                           void**& extra, hipEvent_t& startEvent,
+                                           hipEvent_t& stopEvent, uint32_t& flags) {
+  ClPrint(amd::LOG_INFO, amd::LOG_API,
+          "[hipGraph] current capture node Ext kernel launch on stream : %p", stream);
+  if (!hip::isValid(stream)) {
+    return hipErrorInvalidValue;
+  }
+  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+
+  hipGraphNode_t pGraphNode;
+  hipError_t status;
+  if (startEvent != nullptr) {
+    pGraphNode = new hipGraphEventRecordNode(startEvent);
+    status = ihipGraphAddNode(pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                              s->GetLastCapturedNodes().size());
+    if (status != hipSuccess) {
+      return status;
+    }
+    s->SetLastCapturedNode(pGraphNode);
+  }
+  hipKernelNodeParams nodeParams;
+  nodeParams.func = f;
+  nodeParams.blockDim = dim3(localWorkSizeX, localWorkSizeY, localWorkSizeZ);
+  nodeParams.extra = extra;
+  nodeParams.gridDim = dim3(globalWorkSizeX / localWorkSizeX, globalWorkSizeY / localWorkSizeY,
+                            globalWorkSizeZ / localWorkSizeZ);
+  nodeParams.kernelParams = kernelParams;
+  nodeParams.sharedMemBytes = sharedMemBytes;
+  status =
+      ihipGraphAddKernelNode(&pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                             s->GetLastCapturedNodes().size(), &nodeParams);
+
+  if (status != hipSuccess) {
+    return status;
+  }
+  s->SetLastCapturedNode(pGraphNode);
+  if (stopEvent != nullptr) {
+    pGraphNode = new hipGraphEventRecordNode(stopEvent);
+    status = ihipGraphAddNode(pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                              s->GetLastCapturedNodes().size());
+    if (status != hipSuccess) {
+      return status;
+    }
+    s->SetLastCapturedNode(pGraphNode);
+  }
   return hipSuccess;
 }
 
@@ -909,6 +964,7 @@ hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       (numDependencies > 0 && pDependencies == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
   HIP_RETURN_DURATION(
       ihipGraphAddKernelNode(pGraphNode, graph, pDependencies, numDependencies, pNodeParams));
 }
@@ -1017,10 +1073,12 @@ hipError_t ihipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph) {
   }
   std::vector<std::vector<Node>> parallelLists;
   std::unordered_map<Node, std::vector<Node>> nodeWaitLists;
+  std::unordered_set<hipUserObject*> graphExeUserObj;
   clonedGraph->GetRunList(parallelLists, nodeWaitLists);
   std::vector<Node> levelOrder;
   clonedGraph->LevelOrder(levelOrder);
-  *pGraphExec = new hipGraphExec(levelOrder, parallelLists, nodeWaitLists, clonedNodes);
+  clonedGraph->GetUserObjs(graphExeUserObj);
+  *pGraphExec = new hipGraphExec(levelOrder, parallelLists, nodeWaitLists, clonedNodes, graphExeUserObj);
   if (*pGraphExec != nullptr) {
     return (*pGraphExec)->Init();
   } else {
@@ -1965,4 +2023,65 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   }
   // not implemented yet
   return HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy, unsigned int initialRefcount, unsigned int flags) {
+  HIP_INIT_API(hipUserObjectCreate, object_out, ptr, destroy, initialRefcount, flags);
+  if (object_out == nullptr || flags != hipUserObjectNoDestructorSync) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  *object_out = new hipUserObject(destroy, ptr, flags);
+  //! Creating object adds one reference.
+  if (initialRefcount > 1) {
+    (*object_out)->increaseRefCount(static_cast<const unsigned int>(initialRefcount - 1));
+  }
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count) {
+  HIP_INIT_API(hipUserObjectRelease, object, count);
+  if (object == nullptr || !hipUserObject::isUserObjvalid(object) || (object->referenceCount() < count)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  object->decreaseRefCount(count);
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count) {
+  HIP_INIT_API(hipUserObjectRetain, object, count);
+  if (object == nullptr || !hipUserObject::isUserObjvalid(object)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  object->increaseRefCount(count);
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count, unsigned int flags) {
+  HIP_INIT_API(hipGraphRetainUserObject, graph, object, count, flags);
+  hipError_t status = hipSuccess;
+  if (graph == nullptr || object == nullptr || !hipUserObject::isUserObjvalid(object)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (flags != hipGraphUserObjectMove) {
+    status = hipUserObjectRetain(object, count);
+    if (status != hipSuccess) {
+      HIP_RETURN(status);
+    }
+  }
+  graph->addUserObjGraph(object);
+  HIP_RETURN(status);
+}
+
+hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count) {
+  HIP_INIT_API(hipGraphReleaseUserObject, graph, object, count);
+  if (graph == nullptr || object == nullptr || !graph->isUserObjGraphValid(object)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  //! Obj is being destroyed
+  if (object->referenceCount() == count) {
+    graph->RemoveUserObjGraph(object);
+  }
+  hipError_t status = hipUserObjectRelease(object, count);
+  HIP_RETURN(status);
 }

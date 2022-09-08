@@ -770,7 +770,9 @@ hipError_t StatCO::registerStatFunction(const void* hostFunction, Function* func
   return hipSuccess;
 }
 
-const char* StatCO::getStatFuncName(const void* hostFunction) const {
+const char* StatCO::getStatFuncName(const void* hostFunction) {
+  amd::ScopedLock lock(sclock_);
+
   const auto it = functions_.find(hostFunction);
   if (it == functions_.end()) {
     return nullptr;
@@ -843,7 +845,7 @@ hipError_t StatCO::initStatManagedVarDevicePtr(int deviceId) {
       DeviceVar* dvar = nullptr;
       IHIP_RETURN_ONFAIL(var->getStatDeviceVar(&dvar, deviceId));
 
-      amd::HostQueue* queue = hip::getNullStream();
+      amd::HostQueue* queue = g_devices.at(deviceId)->NullStream();
       if (queue != nullptr) {
         err = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), var->getManagedVarPtr(),
                          dvar->size(), hipMemcpyHostToDevice, *queue);

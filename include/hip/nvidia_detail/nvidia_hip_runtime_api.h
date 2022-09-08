@@ -230,6 +230,11 @@ inline static CUresourcetype hipResourcetype_enumToCUresourcetype(
 #define hiparray CUarray
 typedef CUmipmappedArray hipMipmappedArray_t;
 
+#define HIP_TRSA_OVERRIDE_FORMAT        CU_TRSA_OVERRIDE_FORMAT
+#define HIP_TRSF_READ_AS_INTEGER        CU_TRSF_READ_AS_INTEGER
+#define HIP_TRSF_NORMALIZED_COORDINATES CU_TRSF_NORMALIZED_COORDINATES
+#define HIP_TRSF_SRGB                   CU_TRSF_SRGB
+
 // hipTextureAddressMode
 typedef enum cudaTextureAddressMode hipTextureAddressMode;
 #define hipAddressModeWrap cudaAddressModeWrap
@@ -1102,6 +1107,7 @@ inline static enum cudaChannelFormatKind hipChannelFormatKindToCudaChannelFormat
 typedef cudaGraph_t hipGraph_t;
 typedef cudaGraphNode_t hipGraphNode_t;
 typedef cudaGraphExec_t hipGraphExec_t;
+typedef cudaUserObject_t hipUserObject_t;
 
 typedef enum cudaGraphNodeType hipGraphNodeType;
 #define hipGraphNodeTypeKernel cudaGraphNodeTypeKernel
@@ -1177,6 +1183,16 @@ typedef enum cudaMemAllocationType hipMemAllocationType;
 #define hipMemAllocationTypePinned cudaMemAllocationTypePinned
 #define hipMemAllocationTypeMax cudaMemAllocationTypeMax
 #define hipMemGenericAllocationHandle_t CUmemGenericAllocationHandle
+//CUarrayMapInfo mappings
+typedef CUarrayMapInfo hipArrayMapInfo;
+typedef CUarraySparseSubresourceType hipArraySparseSubresourceType;
+#define hipArraySparseSubresourceTypeSparseLevel CU_ARRAY_SPARSE_SUBRESOURCE_TYPE_SPARSE_LEVEL
+#define hipArraySparseSubresourceTypeMiptail CU_ARRAY_SPARSE_SUBRESOURCE_TYPE_MIPTAIL
+typedef CUmemOperationType hipMemOperationType;
+#define hipMemOperationTypeMap CU_MEM_OPERATION_TYPE_MAP
+#define hipMemOperationTypeUnmap CU_MEM_OPERATION_TYPE_UNMAP
+typedef CUmemHandleType hipMemHandleType;
+#define hipMemHandleTypeGeneric CU_MEM_HANDLE_TYPE_GENERIC
 // Explicitely declaring hipMemAllocationProp based on CUmemAllocationProp but using CUDA runtime members instead
 // Because hipMemAllocationType, hipMemAllocationHandleType & hipMemLocation are defined using CUDA runtime data types & also used by hipMemPoolProps
 // Currently there doesn't exist CUDA inbuilt runtime structure corresponding to CUmemAllocationProp
@@ -1939,7 +1955,19 @@ inline static CUmemAllocationProp hipMemAllocationPropToCUmemAllocationProp(cons
     cuProp.allocFlags.reserved[3] = prop->allocFlags.reserved[3];
     return cuProp;
 }
-
+inline static CUmemLocation hipMemLocationToCUmemLocation(const hipMemLocation* loc) {
+    CUmemLocation cuLoc;
+    cuLoc.id = loc->id;
+    cuLoc.type = (CUmemLocationType)loc->type;
+    return cuLoc;
+}
+inline static CUmemAccessDesc hipMemAccessDescToCUmemAccessDesc(const hipMemAccessDesc* desc) {
+    CUmemAccessDesc cuDesc;
+    cuDesc.flags = (CUmemAccess_flags)desc->flags;
+    cuDesc.location.id = (desc->location).id;
+    cuDesc.location.type = (CUmemLocationType)((desc->location).type);
+    return cuDesc;
+}
 inline static hipError_t hipMemGetAllocationGranularity(size_t* granularity,
                                                         const hipMemAllocationProp* prop,
                                                         hipMemAllocationGranularity_flags option) {
@@ -1955,6 +1983,61 @@ inline static hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle,
 }
 inline static hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle) {
     return hipCUResultTohipError(cuMemRelease(handle));
+}
+inline static hipError_t hipMemAddressFree(hipDeviceptr_t ptr, size_t size) {
+    return hipCUResultTohipError(cuMemAddressFree(ptr, size));
+}
+inline static hipError_t hipMemAddressReserve(hipDeviceptr_t* ptr,
+                                              size_t size,
+                                              size_t alignment,
+                                              hipDeviceptr_t addr,
+                                              unsigned long long flags) {
+    return hipCUResultTohipError(cuMemAddressReserve(ptr, size, alignment, addr, flags));
+}
+inline static hipError_t hipMemExportToShareableHandle(void* shareableHandle,
+                                                       hipMemGenericAllocationHandle_t handle,
+                                                       hipMemAllocationHandleType handleType,
+                                                       unsigned long long flags) {
+    return hipCUResultTohipError(cuMemExportToShareableHandle(shareableHandle, handle, (CUmemAllocationHandleType)handleType, flags));
+}
+inline static hipError_t hipMemGetAccess(unsigned long long* flags,
+                                         const hipMemLocation* location,
+                                         hipDeviceptr_t ptr) {
+    CUmemLocation loc = hipMemLocationToCUmemLocation(location);
+    return hipCUResultTohipError(cuMemGetAccess(flags, &loc, ptr));
+}
+inline static hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
+                                                                 hipMemGenericAllocationHandle_t handle) {
+    CUmemAllocationProp cuProp = hipMemAllocationPropToCUmemAllocationProp(prop);
+    return hipCUResultTohipError(cuMemGetAllocationPropertiesFromHandle(&cuProp, handle));
+}
+inline static hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle,
+                                                         void* osHandle,
+                                                         hipMemAllocationHandleType shHandleType) {
+    return hipCUResultTohipError(cuMemImportFromShareableHandle(handle, osHandle, (CUmemAllocationHandleType)shHandleType));
+}
+inline static hipError_t hipMemMap(hipDeviceptr_t ptr, size_t size, size_t offset,
+                                   hipMemGenericAllocationHandle_t handle,
+                                   unsigned long long flags) {
+    return hipCUResultTohipError(cuMemMap(ptr, size, offset, handle, flags));
+}
+inline static hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList,
+                                             unsigned int  count,
+                                             hipStream_t stream) {
+    return hipCUResultTohipError(cuMemMapArrayAsync(mapInfoList, count, stream));
+}
+inline static hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
+                                                      void* addr) {
+    return hipCUResultTohipError(cuMemRetainAllocationHandle(handle, addr));
+}
+inline static hipError_t hipMemSetAccess(hipDeviceptr_t ptr, size_t size,
+                                         const hipMemAccessDesc* desc,
+                                         size_t count) {
+    CUmemAccessDesc cuDesc = hipMemAccessDescToCUmemAccessDesc(desc);
+    return hipCUResultTohipError(cuMemSetAccess(ptr, size, &cuDesc, count));
+}
+inline static hipError_t hipMemUnmap(hipDeviceptr_t ptr, size_t size) {
+    return hipCUResultTohipError(cuMemUnmap(ptr, size));
 }
 #endif // CUDA_VERSION >= CUDA_10020
 
@@ -3149,6 +3232,29 @@ inline static hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAt
 
 inline static hipError_t hipDeviceGraphMemTrim(int device) {
     return hipCUDAErrorTohipError(cudaDeviceGraphMemTrim(device));
+}
+
+inline static hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy,
+                                             unsigned int initialRefcount, unsigned int flags) {
+    return hipCUDAErrorTohipError(cudaUserObjectCreate(object_out, ptr, destroy, initialRefcount, flags));
+}
+
+
+inline static hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count __dparm(1)) {
+    return hipCUDAErrorTohipError(cudaUserObjectRelease(object, count));
+}
+
+
+inline static hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count __dparm(1)) {
+    return hipCUDAErrorTohipError(cudaUserObjectRelease(object, count));
+}
+
+inline static hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count __dparm(1), unsigned int flags __dparm(0)) {
+    return hipCUDAErrorTohipError(cudaGraphRetainUserObject(graph, object, count, flags));
+}
+
+inline static hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count __dparm(1)) {
+    return hipCUDAErrorTohipError(cudaGraphReleaseUserObject(graph, object, count));
 }
 #endif
 
