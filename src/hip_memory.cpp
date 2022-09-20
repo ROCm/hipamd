@@ -753,9 +753,6 @@ hipError_t ihipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t heigh
 hipError_t hipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t height) {
   HIP_INIT_API(hipMallocPitch, ptr, pitch, width, height);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  if (width == 0 || height == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
   HIP_RETURN(ihipMallocPitch(ptr, pitch, width, height, 1), (ptr != nullptr)? *ptr : nullptr);
 }
 
@@ -1043,6 +1040,9 @@ hipError_t hipArray3DCreate(hipArray** array,
                             const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
   HIP_INIT_API(hipArray3DCreate, array, pAllocateArray);
   CHECK_STREAM_CAPTURE_SUPPORTED();
+  if (pAllocateArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   HIP_RETURN(ihipArrayCreate(array, pAllocateArray, 0 /* numMipLevels */));
 }
 
@@ -2873,6 +2873,9 @@ hipError_t hipMemAllocPitch(hipDeviceptr_t* dptr, size_t* pitch, size_t widthInB
                             size_t height, unsigned int elementSizeBytes) {
   HIP_INIT_API(hipMemAllocPitch, dptr, pitch, widthInBytes, height, elementSizeBytes);
   CHECK_STREAM_CAPTURE_SUPPORTED();
+  if (widthInBytes == 0 || height == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   if (elementSizeBytes != 4 && elementSizeBytes != 8 && elementSizeBytes != 16) {
     HIP_RETURN(hipErrorInvalidValue);
   }
