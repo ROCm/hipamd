@@ -229,7 +229,9 @@ if(HIP_RUNTIME MATCHES "rocclr")
   )
 
   get_target_property(amdhip64_type hip::amdhip64 TYPE)
-  message(STATUS "hip::amdhip64 is ${amdhip64_type}")
+  if(HIP_FIND_REQUIRED)
+    message(STATUS "hip::amdhip64 is ${amdhip64_type}")
+  endif()
 
   if(NOT WIN32)
     set_target_properties(hip::device PROPERTIES
