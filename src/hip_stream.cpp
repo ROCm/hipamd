@@ -209,6 +209,7 @@ void Stream::destroyAllStreams(int deviceId) {
 // ================================================================================================
 void iHipWaitActiveStreams(amd::HostQueue* blocking_queue, bool wait_null_stream) {
   amd::Command::EventWaitList eventWaitList(0);
+  bool submitMarker = 0;
   {
     amd::ScopedLock lock(streamSetLock);
 
@@ -232,6 +233,7 @@ void iHipWaitActiveStreams(amd::HostQueue* blocking_queue, bool wait_null_stream
           if (!ready) {
             ready = (command->status() == CL_COMPLETE);
           }
+          submitMarker |= active_queue->vdev()->isFenceDirty();
           // Check the current active status
           if (!ready) {
             command->notifyCmdQueue();
@@ -249,7 +251,7 @@ void iHipWaitActiveStreams(amd::HostQueue* blocking_queue, bool wait_null_stream
   }
 
   // Check if we have to wait anything
-  if (eventWaitList.size() > 0) {
+  if (eventWaitList.size() > 0 || submitMarker) {
     amd::Command* command = new amd::Marker(*blocking_queue, kMarkerDisableFlush, eventWaitList);
     if (command != nullptr) {
       command->enqueue();
