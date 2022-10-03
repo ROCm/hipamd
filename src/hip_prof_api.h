@@ -31,143 +31,61 @@
 #include "hip/amd_detail/hip_prof_str.h"
 #include "platform/prof_protocol.h"
 
-// HIP API callbacks spawner object macro
-#define HIP_CB_SPAWNER_OBJECT(CB_ID) \
-  api_callbacks_spawner_t<HIP_API_ID_##CB_ID> __api_tracer; \
-  { \
-    hip_api_data_t* api_data = __api_tracer.get_api_data_ptr(); \
-    if (api_data != nullptr) { \
-      INIT_CB_ARGS_DATA(CB_ID, (*api_data)); \
-      __api_tracer.call(); \
-    } \
-  }
+struct hip_api_trace_data_t {
+  hip_api_data_t api_data;
+  uint64_t phase_enter_timestamp;
+  uint64_t phase_data;
 
-class api_callbacks_table_t {
- public:
-  api_callbacks_table_t() = default;
-
-  bool set_activity(hip_api_id_t id, activity_sync_callback_t function, void* arg) {
-    if (id < HIP_API_ID_FIRST || id > HIP_API_ID_LAST)
-      return false;
-
-    /* 'function != nullptr' indicates it is activity register call,
-       increment should happen only once but client is free to call
-       register CB multiple times for same API id hence the check
-
-       'function == nullptr' indicates it is de-register call and
-       decrement should happen only once hence the check. */
-
-    if (function != nullptr) {
-      if (callbacks_table_[id].activity.first == nullptr) {
-        ++enabled_api_count_;
-      }
-    } else {
-      if (callbacks_table_[id].activity.first != nullptr) {
-        --enabled_api_count_;
-      }
-    }
-    amd::IS_PROFILER_ON = (enabled_api_count_ > 0);
-
-    std::unique_lock lock(callbacks_table_[id].mutex);
-    callbacks_table_[id].activity = {function, arg};
-
-    return true;
-  }
-
-  bool set_callback(hip_api_id_t id, activity_rtapi_callback_t function, void* arg) {
-    if (id < HIP_API_ID_FIRST || id > HIP_API_ID_LAST)
-      return false;
-
-    std::unique_lock lock(callbacks_table_[id].mutex);
-    callbacks_table_[id].user_callback = {function, arg};
-
-    return true;
-  }
-
-  auto get_callback_and_activity(hip_api_id_t id) {
-    assert(id >= HIP_API_ID_FIRST && id <= HIP_API_ID_LAST && "invalid callback id");
-    auto& entry = callbacks_table_[id];
-
-    std::shared_lock lock(callbacks_table_[id].mutex);
-    auto ret = std::make_pair(entry.user_callback, entry.activity);
-
-    return ret;
-  }
-
-  void set_enabled(bool enabled) {
-    amd::IS_PROFILER_ON = enabled;
-  }
-
-  bool is_enabled() const {
-    return amd::IS_PROFILER_ON;
-  }
-
- private:
-  uint32_t enabled_api_count_{0};
-
-  // HIP API callbacks table
-  struct {
-    std::shared_mutex mutex;
-    std::pair<activity_sync_callback_t, void*> activity;
-    std::pair<activity_rtapi_callback_t, void*> user_callback;
-  } callbacks_table_[HIP_API_ID_LAST + 1]{};
+  void (*phase_enter)(hip_api_id_t operation_id, hip_api_trace_data_t* data);
+  void (*phase_exit)(hip_api_id_t operation_id, hip_api_trace_data_t* data);
 };
 
-extern api_callbacks_table_t callbacks_table;
+// HIP API callbacks spawner object macro
+#define HIP_CB_SPAWNER_OBJECT(operation_id)                                                        \
+  api_callbacks_spawner_t<HIP_API_ID_##operation_id> __api_tracer(                                 \
+      [=](auto& api_data) { INIT_CB_ARGS_DATA(operation_id, api_data); });
 
-template <hip_api_id_t ID>
-class api_callbacks_spawner_t {
+template <hip_api_id_t operation_id> class api_callbacks_spawner_t {
  public:
-  api_callbacks_spawner_t() :
-    api_data_(nullptr)
-  {
-    static_assert(ID >= HIP_API_ID_FIRST && ID <= HIP_API_ID_LAST, "invalid callback id");
-    if (!callbacks_table.is_enabled()) return;
+  template <typename Functor> api_callbacks_spawner_t(Functor init_cb_args_data) {
+    static_assert(operation_id >= HIP_API_ID_FIRST && operation_id <= HIP_API_ID_LAST,
+                  "invalid HIP_API operation id");
 
-    std::tie(user_callback_, activity_) = callbacks_table.get_callback_and_activity(ID);
+    if (auto function = activity_prof::report_activity.load(std::memory_order_relaxed); function &&
+        (enabled_ = function(ACTIVITY_DOMAIN_HIP_API, operation_id, &trace_data_) == 0)) {
+      activity_prof::correlation_id = trace_data_.api_data.correlation_id;
 
-    if (activity_.first != nullptr)
-      api_data_ = (hip_api_data_t*) activity_.first(ID, nullptr, nullptr, nullptr);
-  }
-
-  void call() {
-    if (user_callback_.first != nullptr)
-      user_callback_.first(ACTIVITY_DOMAIN_HIP_API, ID, api_data_, user_callback_.second);
+      if (trace_data_.phase_enter != nullptr) {
+        init_cb_args_data(trace_data_.api_data);
+        trace_data_.phase_enter(operation_id, &trace_data_);
+      }
+    }
   }
 
   ~api_callbacks_spawner_t() {
-    if (api_data_ == nullptr)
-      return;
-
-    api_data_->phase = ACTIVITY_API_PHASE_EXIT;
-    if (user_callback_.first != nullptr)
-      user_callback_.first(ACTIVITY_DOMAIN_HIP_API, ID, api_data_, user_callback_.second);
-
-    if (activity_.first != nullptr)
-      activity_.first(ID, nullptr, nullptr, activity_.second);
-  }
-
-  hip_api_data_t* get_api_data_ptr() const {
-    return api_data_;
+    if (enabled_) {
+      if (trace_data_.phase_exit != nullptr) trace_data_.phase_exit(operation_id, &trace_data_);
+      activity_prof::correlation_id = 0;
+    }
   }
 
  private:
-  std::pair<activity_rtapi_callback_t /* function */, void * /* arg */> user_callback_;
-  std::pair<activity_sync_callback_t /* function */, void * /* arg */> activity_;
-  hip_api_data_t* api_data_;
+  bool enabled_{false};
+  union {
+    hip_api_trace_data_t trace_data_;
+  };
 };
 
-template <>
-class api_callbacks_spawner_t<HIP_API_ID_NONE> {
+template <> class api_callbacks_spawner_t<HIP_API_ID_NONE> {
  public:
-  api_callbacks_spawner_t() {}
-  void call() {}
-  hip_api_data_t* get_api_data_ptr() { return nullptr; }
+  template <typename Functor> api_callbacks_spawner_t(Functor) {}
 };
 
 #else
 
-#define HIP_CB_SPAWNER_OBJECT(x) do {} while(0)
+#define HIP_CB_SPAWNER_OBJECT(x)                                                                   \
+  do {                                                                                             \
+  } while (false)
 
 class api_callbacks_table_t {
  public:
