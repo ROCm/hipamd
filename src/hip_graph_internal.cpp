@@ -291,7 +291,7 @@ hipError_t hipGraphMemcpyNode::ValidateParams(const hipMemcpy3DParms* pNodeParam
       return status;
     }
   } else {
-    ShouldNotReachHere();
+    return hipErrorInvalidValue;
   }
   return hipSuccess;
 }
@@ -469,7 +469,7 @@ hipError_t hipGraphMemcpyNode::SetCommandParams(const hipMemcpy3DParms* pNodePar
     amd::CopyMemoryCommand* command = reinterpret_cast<amd::CopyMemoryCommand*>(commands_[0]);
     command->setParams(*srcImage, *dstImage, srcOrigin, dstOrigin, copyRegion);
   } else {
-    ShouldNotReachHere();
+    return hipErrorInvalidValue;
   }
   return hipSuccess;
 }
@@ -493,6 +493,7 @@ void ihipGraph::AddNode(const Node& node) {
 
 void ihipGraph::RemoveNode(const Node& node) {
   vertices_.erase(std::remove(vertices_.begin(), vertices_.end(), node), vertices_.end());
+  delete node;
 }
 
 // root nodes are all vertices with 0 in-degrees
@@ -817,7 +818,6 @@ hipError_t hipGraphExec::Run(hipStream_t stream) {
     endCommand->enqueue();
     endCommand->release();
   }
-  if (stream == nullptr)  queue->finish();
   ResetQueueIndex();
   return status;
 }
