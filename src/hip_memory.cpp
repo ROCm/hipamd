@@ -191,7 +191,7 @@ hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
 #endif
     HIP_RETURN(hipSuccess);
   }
-  HIP_RETURN(hipErrorInvalidValue);
+  HIP_RETURN(hipErrorNotSupported);
 }
 
 
@@ -446,9 +446,13 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
       return hipErrorInvalidValue;
     }
   } else if ((srcMemory == nullptr) && (dstMemory != nullptr)) {
-    isAsync = false;
+    if (AMD_DIRECT_DISPATCH) {
+      isAsync = false;
+    }
   } else if ((srcMemory != nullptr) && (dstMemory == nullptr)) {
-    isAsync = false;
+    if (AMD_DIRECT_DISPATCH) {
+      isAsync = false;
+    }
   }
   amd::Command* command = nullptr;
   status = ihipMemcpyCommand(command, dst, src, sizeBytes, kind, queue);
@@ -2909,7 +2913,7 @@ hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* dev_ptr) {
 
   if(!device->IpcCreate(dev_ptr, &(ihandle->psize), &(ihandle->ipc_handle), &(ihandle->poffset))) {
     LogPrintfError("IPC memory creation failed for memory: 0x%x", dev_ptr);
-    HIP_RETURN(hipErrorInvalidDevicePointer);
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(hipSuccess);
@@ -2964,7 +2968,7 @@ hipError_t hipIpcCloseMemHandle(void* dev_ptr) {
 
   /* detach the memory */
   if (!device->IpcDetach(dev_ptr)){
-     HIP_RETURN(hipErrorInvalidHandle);
+     HIP_RETURN(hipErrorInvalidValue);
   }
 
   HIP_RETURN(hipSuccess);
