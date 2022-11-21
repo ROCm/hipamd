@@ -430,7 +430,8 @@ hipError_t hipDeviceGetPCIBusId ( char* pciBusId, int  len, int  device ) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  if (pciBusId == nullptr || len <= 0) {
+  //pciBusId should be large enough to store 13 characters including the NULL-terminator.
+  if (pciBusId == nullptr || len <= 12) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -576,7 +577,7 @@ hipError_t hipSetDeviceFlags ( unsigned int  flags ) {
 
   if (((scheduleFlag & mutualExclusiveFlags) != hipDeviceScheduleSpin) && ((scheduleFlag & mutualExclusiveFlags) != hipDeviceScheduleYield)
       && ((scheduleFlag & mutualExclusiveFlags) != hipDeviceScheduleBlockingSync)
-      && ((scheduleFlag & hipDeviceScheduleAuto) != hipDeviceScheduleAuto)) {
+      && ((scheduleFlag & mutualExclusiveFlags) != hipDeviceScheduleAuto)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
