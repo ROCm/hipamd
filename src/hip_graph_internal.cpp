@@ -37,7 +37,7 @@ const char* GetGraphNodeTypeString(uint32_t op) {
     CASE_STRING(hipGraphNodeTypeWaitEvent, WaitEventNode)
     CASE_STRING(hipGraphNodeTypeEventRecord, EventRecordNode)
     CASE_STRING(hipGraphNodeTypeExtSemaphoreSignal, ExtSemaphoreSignalNode)
-    CASE_STRING(hipGraphNodeTypeExtSemaphoreWait,  ExtSemaphoreWaitNode)
+    CASE_STRING(hipGraphNodeTypeExtSemaphoreWait, ExtSemaphoreWaitNode)
     CASE_STRING(hipGraphNodeTypeMemcpyFromSymbol, MemcpyFromSymbolNode)
     CASE_STRING(hipGraphNodeTypeMemcpyToSymbol, MemcpyToSymbolNode)
     default:
@@ -47,6 +47,7 @@ const char* GetGraphNodeTypeString(uint32_t op) {
 };
 
 int hipGraphNode::nextID = 0;
+int ihipGraph::nextID = 0;
 std::unordered_set<hipGraphNode*> hipGraphNode::nodeSet_;
 amd::Monitor hipGraphNode::nodeSetLock_{"Guards global node set"};
 std::unordered_set<ihipGraph*> ihipGraph::graphSet_;
@@ -72,14 +73,14 @@ hipError_t hipGraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size
   size_t dOffset = 0;
   amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
 
-  if ((srcMemory == nullptr) && (dstMemory != nullptr)) { //host to device
+  if ((srcMemory == nullptr) && (dstMemory != nullptr)) {  // host to device
     if (origDstMemory->getContext().devices()[0] != dstMemory->getContext().devices()[0]) {
       return hipErrorInvalidValue;
     }
     if (kind != hipMemcpyHostToDevice) {
       return hipErrorInvalidValue;
     }
-  } else if ((srcMemory != nullptr) && (dstMemory == nullptr)) { //device to host
+  } else if ((srcMemory != nullptr) && (dstMemory == nullptr)) {  // device to host
     if (origSrcMemory->getContext().devices()[0] != srcMemory->getContext().devices()[0]) {
       return hipErrorInvalidValue;
     }
@@ -635,14 +636,12 @@ void ihipGraph::LevelOrder(std::vector<Node>& levelOrder) {
   }
 }
 
-const ihipGraph* ihipGraph::getOriginalGraph() const {
-  return pOriginalGraph_;
-}
+const ihipGraph* ihipGraph::getOriginalGraph() const { return pOriginalGraph_; }
 void ihipGraph::setOriginalGraph(const ihipGraph* pOriginalGraph) {
   pOriginalGraph_ = pOriginalGraph;
 }
 
-ihipGraph* ihipGraph::clone(std::unordered_map<Node, Node>& clonedNodes) const{
+ihipGraph* ihipGraph::clone(std::unordered_map<Node, Node>& clonedNodes) const {
   ihipGraph* newGraph = new ihipGraph();
   for (auto entry : vertices_) {
     hipGraphNode* node = entry->clone();
@@ -673,7 +672,7 @@ ihipGraph* ihipGraph::clone(std::unordered_map<Node, Node>& clonedNodes) const{
   return newGraph;
 }
 
-ihipGraph* ihipGraph::clone() const{
+ihipGraph* ihipGraph::clone() const {
   std::unordered_map<Node, Node> clonedNodes;
   return clone(clonedNodes);
 }
@@ -690,9 +689,9 @@ hipError_t hipGraphExec::CreateQueues(size_t numQueues) {
   parallelQueues_.reserve(numQueues);
   for (size_t i = 0; i < numQueues; i++) {
     amd::HostQueue* queue;
-    queue = new amd::HostQueue(*hip::getCurrentDevice()->asContext(),
-                               *hip::getCurrentDevice()->devices()[0], 0,
-                               amd::CommandQueue::RealTimeDisabled, amd::CommandQueue::Priority::Normal);
+    queue = new amd::HostQueue(
+        *hip::getCurrentDevice()->asContext(), *hip::getCurrentDevice()->devices()[0], 0,
+        amd::CommandQueue::RealTimeDisabled, amd::CommandQueue::Priority::Normal);
 
     bool result = (queue != nullptr) ? queue->create() : false;
     // Create a host queue
@@ -719,8 +718,7 @@ hipError_t hipGraphExec::Init() {
 
 hipError_t FillCommands(std::vector<std::vector<Node>>& parallelLists,
                         std::unordered_map<Node, std::vector<Node>>& nodeWaitLists,
-                        std::vector<Node>& levelOrder,
-                        std::vector<amd::Command*>& rootCommands,
+                        std::vector<Node>& levelOrder, std::vector<amd::Command*>& rootCommands,
                         amd::Command*& endCommand, amd::HostQueue* queue) {
   hipError_t status;
   for (auto& node : levelOrder) {

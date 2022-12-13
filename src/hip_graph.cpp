@@ -774,6 +774,7 @@ hipError_t capturehipStreamWaitEvent(hipEvent_t& event, hipStream_t& stream, uns
   }
   if (!s->IsOriginStream()) {
     s->SetCaptureGraph(reinterpret_cast<hip::Stream*>(e->GetCaptureStream())->GetCaptureGraph());
+    s->SetCaptureId(reinterpret_cast<hip::Stream*>(e->GetCaptureStream())->GetCaptureID());
     s->SetCaptureMode(reinterpret_cast<hip::Stream*>(e->GetCaptureStream())->GetCaptureMode());
     s->SetParentStream(e->GetCaptureStream());
     reinterpret_cast<hip::Stream*>(s->GetParentStream())->SetParallelCaptureStream(stream);
@@ -806,6 +807,9 @@ hipError_t capturehipLaunchHostFunc(hipStream_t& stream, hipHostFn_t& fn, void*&
 hipError_t hipStreamIsCapturing_common(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus) {
   if (pCaptureStatus == nullptr || !hip::isValid(stream)) {
     return hipErrorInvalidValue;
+  }
+  if (hip::Stream::StreamCaptureBlocking() == true && stream == nullptr) {
+    return hipErrorStreamCaptureImplicit;
   }
   if (stream == nullptr) {
     *pCaptureStatus = hipStreamCaptureStatusNone;
@@ -849,8 +853,7 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
   if (stream == nullptr) {
     return hipErrorStreamCaptureUnsupported;
   }
-  if (mode < hipStreamCaptureModeGlobal ||
-      mode > hipStreamCaptureModeRelaxed) {
+  if (mode < hipStreamCaptureModeGlobal || mode > hipStreamCaptureModeRelaxed) {
     return hipErrorInvalidValue;
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
@@ -860,6 +863,7 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
   }
 
   s->SetCaptureGraph(new ihipGraph());
+  s->SetCaptureId();
   s->SetCaptureMode(mode);
   s->SetOriginStream();
   if (mode != hipStreamCaptureModeRelaxed) {
@@ -904,8 +908,7 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hipGraph_t* pGraph) {
   }
   // If mode is not hipStreamCaptureModeRelaxed, hipStreamEndCapture must be called on the stream
   // from the same thread
-  const auto& it = std::find(hip::tls.capture_streams_.begin(),
-                    hip::tls.capture_streams_.end(), s);
+  const auto& it = std::find(hip::tls.capture_streams_.begin(), hip::tls.capture_streams_.end(), s);
   if (s->GetCaptureMode() != hipStreamCaptureModeRelaxed) {
     if (it == hip::tls.capture_streams_.end()) {
       return hipErrorStreamCaptureWrongThread;
@@ -1113,7 +1116,8 @@ hipError_t ihipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph) {
   std::vector<Node> levelOrder;
   clonedGraph->LevelOrder(levelOrder);
   clonedGraph->GetUserObjs(graphExeUserObj);
-  *pGraphExec = new hipGraphExec(levelOrder, parallelLists, nodeWaitLists, clonedNodes, graphExeUserObj);
+  *pGraphExec =
+      new hipGraphExec(levelOrder, parallelLists, nodeWaitLists, clonedNodes, graphExeUserObj);
   if (*pGraphExec != nullptr) {
     return (*pGraphExec)->Init();
   } else {
@@ -1162,7 +1166,7 @@ hipError_t ihipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
   return graphExec->Run(stream);
 }
 
-hipError_t hipGraphLaunch_common( hipGraphExec_t graphExec, hipStream_t stream) {
+hipError_t hipGraphLaunch_common(hipGraphExec_t graphExec, hipStream_t stream) {
   if (graphExec == nullptr || !hip::isValid(stream) || !hipGraphExec::isGraphExecValid(graphExec)) {
     return hipErrorInvalidValue;
   }
@@ -1265,7 +1269,8 @@ hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
   if (hNode == nullptr || value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (attr != hipKernelNodeAttributeAccessPolicyWindow && attr != hipKernelNodeAttributeCooperative ) {
+  if (attr != hipKernelNodeAttributeAccessPolicyWindow &&
+      attr != hipKernelNodeAttributeCooperative) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(reinterpret_cast<hipGraphKernelNode*>(hNode)->SetAttrParams(attr, value));
@@ -1277,7 +1282,8 @@ hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
   if (hNode == nullptr || value == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (attr != hipKernelNodeAttributeAccessPolicyWindow && attr != hipKernelNodeAttributeCooperative ) {
+  if (attr != hipKernelNodeAttributeAccessPolicyWindow &&
+      attr != hipKernelNodeAttributeCooperative) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(reinterpret_cast<hipGraphKernelNode*>(hNode)->GetAttrParams(attr, value));
@@ -1418,7 +1424,7 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
     HIP_RETURN(hipErrorUnknown);
   }
 
-// Validate whether the topology of node and childGraph matches
+  // Validate whether the topology of node and childGraph matches
   std::vector<Node> childGraphNodes1;
   node->LevelOrder(childGraphNodes1);
 
@@ -1444,10 +1450,14 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   HIP_RETURN(reinterpret_cast<hipChildGraphNode*>(clonedNode)->SetParams(childGraph));
 }
 
-hipError_t hipStreamGetCaptureInfo_common(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus,
-                                   unsigned long long* pId) {
+hipError_t hipStreamGetCaptureInfo_common(hipStream_t stream,
+                                          hipStreamCaptureStatus* pCaptureStatus,
+                                          unsigned long long* pId) {
   if (pCaptureStatus == nullptr || !hip::isValid(stream)) {
     return hipErrorInvalidValue;
+  }
+  if (hip::Stream::StreamCaptureBlocking() == true && stream == nullptr) {
+    return hipErrorStreamCaptureImplicit;
   }
   if (stream == nullptr) {
     return hipErrorUnknown;
@@ -1467,18 +1477,22 @@ hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptureStatus* p
 }
 
 hipError_t hipStreamGetCaptureInfo_spt(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus,
-                                   unsigned long long* pId) {
+                                       unsigned long long* pId) {
   HIP_INIT_API(hipStreamGetCaptureInfo, stream, pCaptureStatus, pId);
   PER_THREAD_DEFAULT_STREAM(stream);
   HIP_RETURN(hipStreamGetCaptureInfo_common(stream, pCaptureStatus, pId));
 }
 
-hipError_t hipStreamGetCaptureInfo_v2_common(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
-                                      unsigned long long* id_out, hipGraph_t* graph_out,
-                                      const hipGraphNode_t** dependencies_out,
-                                      size_t* numDependencies_out) {
+hipError_t hipStreamGetCaptureInfo_v2_common(hipStream_t stream,
+                                             hipStreamCaptureStatus* captureStatus_out,
+                                             unsigned long long* id_out, hipGraph_t* graph_out,
+                                             const hipGraphNode_t** dependencies_out,
+                                             size_t* numDependencies_out) {
   if (captureStatus_out == nullptr) {
     return hipErrorInvalidValue;
+  }
+  if (hip::Stream::StreamCaptureBlocking() == true && stream == nullptr) {
+    return hipErrorStreamCaptureImplicit;
   }
   if (stream == nullptr) {
     return hipErrorUnknown;
@@ -1512,18 +1526,19 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus
   HIP_INIT_API(hipStreamGetCaptureInfo_v2, stream, captureStatus_out, id_out, graph_out,
                dependencies_out, numDependencies_out);
   HIP_RETURN(hipStreamGetCaptureInfo_v2_common(stream, captureStatus_out, id_out, graph_out,
-             dependencies_out, numDependencies_out));
+                                               dependencies_out, numDependencies_out));
 }
 
-hipError_t hipStreamGetCaptureInfo_v2_spt(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
-                                      unsigned long long* id_out, hipGraph_t* graph_out,
-                                      const hipGraphNode_t** dependencies_out,
-                                      size_t* numDependencies_out) {
+hipError_t hipStreamGetCaptureInfo_v2_spt(hipStream_t stream,
+                                          hipStreamCaptureStatus* captureStatus_out,
+                                          unsigned long long* id_out, hipGraph_t* graph_out,
+                                          const hipGraphNode_t** dependencies_out,
+                                          size_t* numDependencies_out) {
   HIP_INIT_API(hipStreamGetCaptureInfo_v2, stream, captureStatus_out, id_out, graph_out,
                dependencies_out, numDependencies_out);
   PER_THREAD_DEFAULT_STREAM(stream);
   HIP_RETURN(hipStreamGetCaptureInfo_v2_common(stream, captureStatus_out, id_out, graph_out,
-             dependencies_out, numDependencies_out));
+                                               dependencies_out, numDependencies_out));
 }
 
 hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,
@@ -1942,8 +1957,8 @@ hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node, hipHostNodeParams* pNo
 
 hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParams* pNodeParams) {
   HIP_INIT_API(hipGraphHostNodeSetParams, node, pNodeParams);
-  if (pNodeParams == nullptr || pNodeParams->fn == nullptr ||
-      node == nullptr || !hipGraphNode::isNodeValid(node)) {
+  if (pNodeParams == nullptr || pNodeParams->fn == nullptr || node == nullptr ||
+      !hipGraphNode::isNodeValid(node)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(reinterpret_cast<hipGraphHostNode*>(node)->SetParams(pNodeParams));
@@ -1952,7 +1967,8 @@ hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParam
 hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                          const hipHostNodeParams* pNodeParams) {
   HIP_INIT_API(hipGraphExecHostNodeSetParams, hGraphExec, node, pNodeParams);
-  if (hGraphExec == nullptr || pNodeParams == nullptr || pNodeParams->fn == nullptr || node == nullptr || !hipGraphNode::isNodeValid(node)) {
+  if (hGraphExec == nullptr || pNodeParams == nullptr || pNodeParams->fn == nullptr ||
+      node == nullptr || !hipGraphNode::isNodeValid(node)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hipGraphNode_t clonedNode = hGraphExec->GetClonedNode(node);
@@ -2056,9 +2072,11 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   return HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy, unsigned int initialRefcount, unsigned int flags) {
+hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy,
+                               unsigned int initialRefcount, unsigned int flags) {
   HIP_INIT_API(hipUserObjectCreate, object_out, ptr, destroy, initialRefcount, flags);
-  if (object_out == nullptr || flags != hipUserObjectNoDestructorSync || initialRefcount == 0 || destroy == nullptr || initialRefcount > INT_MAX) {
+  if (object_out == nullptr || flags != hipUserObjectNoDestructorSync || initialRefcount == 0 ||
+      destroy == nullptr || initialRefcount > INT_MAX) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -2094,7 +2112,8 @@ hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count, unsigned int flags) {
+hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count,
+                                    unsigned int flags) {
   HIP_INIT_API(hipGraphRetainUserObject, graph, object, count, flags);
   hipError_t status = hipSuccess;
   if (graph == nullptr || object == nullptr || count == 0 || count > INT_MAX ||
@@ -2132,4 +2151,83 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, u
   }
   hipError_t status = hipUserObjectRelease(object, count);
   HIP_RETURN(status);
+}
+
+hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst) {
+  HIP_INIT_API(hipGraphKernelNodeCopyAttributes, hSrc, hDst);
+  if (hSrc == nullptr || hDst == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  HIP_RETURN(reinterpret_cast<hipGraphKernelNode*>(hDst)->CopyAttr(
+      reinterpret_cast<hipGraphKernelNode*>(hSrc)));
+}
+
+hipError_t ihipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags) {
+  if (graph == nullptr || path == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  std::ofstream fout;
+  fout.open(path, std::ios::out);
+  if (fout.fail()) {
+    ClPrint(amd::LOG_INFO, amd::LOG_API, "[hipGraph] Error during opening of file : %s", path);
+    return hipErrorOperatingSystem;
+  }
+  fout << "digraph dot {" << std::endl;
+  graph->GenerateDOT(fout, (hipGraphDebugDotFlags)flags);
+  fout << "}" << std::endl;
+  fout.close();
+  return hipSuccess;
+}
+
+hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags) {
+  HIP_INIT_API(hipGraphDebugDotPrint, graph, path, flags);
+  HIP_RETURN(ihipGraphDebugDotPrint(graph, path, flags));
+}
+
+hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+                                  unsigned int isEnabled) {
+  HIP_INIT_API(hipGraphNodeSetEnabled, hGraphExec, hNode, isEnabled);
+  if (hGraphExec == nullptr || hNode == nullptr || !hipGraphExec::isGraphExecValid(hGraphExec) ||
+      !hipGraphNode::isNodeValid(hNode)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipGraphNode_t clonedNode = hGraphExec->GetClonedNode(hNode);
+  if (clonedNode == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!(hNode->GetType() == hipGraphNodeTypeKernel || hNode->GetType() == hipGraphNodeTypeMemcpy ||
+        hNode->GetType() == hipGraphNodeTypeMemset)) {
+    return HIP_RETURN(hipErrorInvalidValue);
+  }
+  clonedNode->SetEnabled(isEnabled);
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+                                  unsigned int* isEnabled) {
+  HIP_INIT_API(hipGraphNodeGetEnabled, hGraphExec, hNode, isEnabled);
+  if (hGraphExec == nullptr || hNode == nullptr || isEnabled == nullptr ||
+      !hipGraphExec::isGraphExecValid(hGraphExec) || !hipGraphNode::isNodeValid(hNode)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipGraphNode_t clonedNode = hGraphExec->GetClonedNode(hNode);
+  if (clonedNode == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!(hNode->GetType() == hipGraphNodeTypeKernel || hNode->GetType() == hipGraphNodeTypeMemcpy ||
+        hNode->GetType() == hipGraphNodeTypeMemset)) {
+    return HIP_RETURN(hipErrorInvalidValue);
+  }
+  *isEnabled = clonedNode->GetEnabled();
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream) {
+  HIP_INIT_API(hipGraphUpload, graphExec, stream);
+  if (graphExec == nullptr || !hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  // TODO: stream is known before launch, do preperatory work with graph optimizations. pre-allocate
+  // memory for memAlloc nodes if any when support is added with mempool feature
+  HIP_RETURN(hipSuccess);
 }

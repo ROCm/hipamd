@@ -36,6 +36,7 @@ THE SOFTWARE.
 #define CUDA_11020 11020
 #define CUDA_11030 11030
 #define CUDA_11040 11040
+#define CUDA_11060 11060
 
 #ifdef __cplusplus
 extern "C" {
@@ -380,6 +381,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipIpcMemLazyEnablePeerAccess cudaIpcMemLazyEnablePeerAccess
 
 #define hipOccupancyDefault cudaOccupancyDefault
+#define hipOccupancyDisableCachingOverride cudaOccupancyDisableCachingOverride
 
 #define hipCooperativeLaunchMultiDeviceNoPreSync    \
         cudaCooperativeLaunchMultiDeviceNoPreSync
@@ -825,6 +827,136 @@ inline static hipError_t hipCUResultTohipError(CUresult cuError) {
     }
 }
 
+inline static CUresult hipErrorToCUResult(hipError_t hError) {
+    switch (hError) {
+        case hipSuccess:
+            return CUDA_SUCCESS;
+        case hipErrorOutOfMemory:
+            return CUDA_ERROR_OUT_OF_MEMORY;
+        case hipErrorInvalidValue:
+            return CUDA_ERROR_INVALID_VALUE;
+        case hipErrorInvalidDevice:
+            return CUDA_ERROR_INVALID_DEVICE;
+        case hipErrorDeinitialized:
+            return CUDA_ERROR_DEINITIALIZED;
+        case hipErrorNoDevice:
+            return CUDA_ERROR_NO_DEVICE;
+        case hipErrorInvalidContext:
+            return CUDA_ERROR_INVALID_CONTEXT;
+        case hipErrorNotInitialized:
+            return CUDA_ERROR_NOT_INITIALIZED;
+        case hipErrorInvalidHandle:
+            return CUDA_ERROR_INVALID_HANDLE;
+        case hipErrorMapFailed:
+            return CUDA_ERROR_MAP_FAILED;
+        case hipErrorProfilerDisabled:
+            return CUDA_ERROR_PROFILER_DISABLED;
+        case hipErrorProfilerNotInitialized:
+            return CUDA_ERROR_PROFILER_NOT_INITIALIZED;
+        case hipErrorProfilerAlreadyStarted:
+            return CUDA_ERROR_PROFILER_ALREADY_STARTED;
+        case hipErrorProfilerAlreadyStopped:
+            return CUDA_ERROR_PROFILER_ALREADY_STOPPED;
+        case hipErrorInvalidImage:
+            return CUDA_ERROR_INVALID_IMAGE;
+        case hipErrorContextAlreadyCurrent:
+            return CUDA_ERROR_CONTEXT_ALREADY_CURRENT;
+        case hipErrorUnmapFailed:
+            return CUDA_ERROR_UNMAP_FAILED;
+        case hipErrorArrayIsMapped:
+            return CUDA_ERROR_ARRAY_IS_MAPPED;
+        case hipErrorAlreadyMapped:
+            return CUDA_ERROR_ALREADY_MAPPED;
+        case hipErrorNoBinaryForGpu:
+            return CUDA_ERROR_NO_BINARY_FOR_GPU;
+        case hipErrorAlreadyAcquired:
+            return CUDA_ERROR_ALREADY_ACQUIRED;
+        case hipErrorNotMapped:
+            return CUDA_ERROR_NOT_MAPPED;
+        case hipErrorNotMappedAsArray:
+            return CUDA_ERROR_NOT_MAPPED_AS_ARRAY;
+        case hipErrorNotMappedAsPointer:
+            return CUDA_ERROR_NOT_MAPPED_AS_POINTER;
+        case hipErrorECCNotCorrectable:
+            return CUDA_ERROR_ECC_UNCORRECTABLE;
+        case hipErrorUnsupportedLimit:
+            return CUDA_ERROR_UNSUPPORTED_LIMIT;
+        case hipErrorContextAlreadyInUse:
+            return CUDA_ERROR_CONTEXT_ALREADY_IN_USE;
+        case hipErrorPeerAccessUnsupported:
+            return CUDA_ERROR_PEER_ACCESS_UNSUPPORTED;
+        case hipErrorInvalidKernelFile:
+            return CUDA_ERROR_INVALID_PTX;
+        case hipErrorInvalidGraphicsContext:
+            return CUDA_ERROR_INVALID_GRAPHICS_CONTEXT;
+        case hipErrorInvalidSource:
+            return CUDA_ERROR_INVALID_SOURCE;
+        case hipErrorFileNotFound:
+            return CUDA_ERROR_FILE_NOT_FOUND;
+        case hipErrorSharedObjectSymbolNotFound:
+            return CUDA_ERROR_SHARED_OBJECT_SYMBOL_NOT_FOUND;
+        case hipErrorSharedObjectInitFailed:
+            return CUDA_ERROR_SHARED_OBJECT_INIT_FAILED;
+        case hipErrorOperatingSystem:
+            return CUDA_ERROR_OPERATING_SYSTEM;
+        case hipErrorIllegalState:
+            return CUDA_ERROR_ILLEGAL_STATE;
+        case hipErrorNotFound:
+            return CUDA_ERROR_NOT_FOUND;
+        case hipErrorNotReady:
+            return CUDA_ERROR_NOT_READY;
+        case hipErrorIllegalAddress:
+            return CUDA_ERROR_ILLEGAL_ADDRESS;
+        case hipErrorLaunchOutOfResources:
+            return CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES;
+        case hipErrorLaunchTimeOut:
+            return CUDA_ERROR_LAUNCH_TIMEOUT;
+        case hipErrorPeerAccessAlreadyEnabled:
+            return CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED;
+        case hipErrorPeerAccessNotEnabled:
+            return CUDA_ERROR_PEER_ACCESS_NOT_ENABLED;
+        case hipErrorSetOnActiveProcess:
+            return CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE;
+        case hipErrorContextIsDestroyed:
+            return CUDA_ERROR_CONTEXT_IS_DESTROYED;
+        case hipErrorAssert:
+            return CUDA_ERROR_ASSERT;
+        case hipErrorHostMemoryAlreadyRegistered:
+            return CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED;
+        case hipErrorHostMemoryNotRegistered:
+            return CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED;
+        case hipErrorLaunchFailure:
+            return CUDA_ERROR_LAUNCH_FAILED;
+        case hipErrorCooperativeLaunchTooLarge:
+            return CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE;
+        case hipErrorNotSupported:
+            return CUDA_ERROR_NOT_SUPPORTED;
+        case hipErrorStreamCaptureUnsupported:
+            return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+        case hipErrorStreamCaptureInvalidated:
+            return CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
+        case hipErrorStreamCaptureMerge:
+            return CUDA_ERROR_STREAM_CAPTURE_MERGE;
+        case hipErrorStreamCaptureUnmatched:
+            return CUDA_ERROR_STREAM_CAPTURE_UNMATCHED;
+        case hipErrorStreamCaptureUnjoined:
+            return CUDA_ERROR_STREAM_CAPTURE_UNJOINED;
+        case hipErrorStreamCaptureIsolation:
+            return CUDA_ERROR_STREAM_CAPTURE_ISOLATION;
+        case hipErrorStreamCaptureImplicit:
+            return CUDA_ERROR_STREAM_CAPTURE_IMPLICIT;
+        case hipErrorCapturedEvent:
+            return CUDA_ERROR_CAPTURED_EVENT;
+        case hipErrorStreamCaptureWrongThread:
+            return CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD;
+        case hipErrorGraphExecUpdateFailure:
+            return CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
+        case hipErrorUnknown:
+        default:
+            return CUDA_ERROR_UNKNOWN;  // Note - translated error.
+    }
+}
+
 inline static cudaError_t hipErrorToCudaError(hipError_t hError) {
     switch (hError) {
         case hipSuccess:
@@ -1125,10 +1257,37 @@ inline static enum cudaChannelFormatKind hipChannelFormatKindToCudaChannelFormat
 }
 
 typedef enum cudaExternalMemoryHandleType hipExternalMemoryHandleType;
+#define hipExternalMemoryHandleTypeOpaqueFd cudaExternalMemoryHandleTypeOpaqueFd
+#define hipExternalMemoryHandleTypeOpaqueWin32 cudaExternalMemoryHandleTypeOpaqueWin32
+#define hipExternalMemoryHandleTypeOpaqueWin32Kmt cudaExternalMemoryHandleTypeOpaqueWin32Kmt
+#define hipExternalMemoryHandleTypeD3D12Heap cudaExternalMemoryHandleTypeD3D12Heap
+#define hipExternalMemoryHandleTypeD3D12Resource cudaExternalMemoryHandleTypeD3D12Resource
+#if CUDA_VERSION >= CUDA_10020
+#define hipExternalMemoryHandleTypeD3D11Resource cudaExternalMemoryHandleTypeD3D11Resource
+#define hipExternalMemoryHandleTypeD3D11ResourceKmt cudaExternalMemoryHandleTypeD3D11ResourceKmt
+#define hipExternalMemoryHandleTypeNvSciBuf cudaExternalMemoryHandleTypeNvSciBuf
+#endif
+
 typedef struct cudaExternalMemoryHandleDesc hipExternalMemoryHandleDesc;
 typedef struct cudaExternalMemoryBufferDesc hipExternalMemoryBufferDesc;
 typedef cudaExternalMemory_t hipExternalMemory_t;
+
 typedef enum cudaExternalSemaphoreHandleType hipExternalSemaphoreHandleType;
+#define hipExternalSemaphoreHandleTypeOpaqueFd cudaExternalSemaphoreHandleTypeOpaqueFd
+#define hipExternalSemaphoreHandleTypeOpaqueWin32 cudaExternalSemaphoreHandleTypeOpaqueWin32
+#define hipExternalSemaphoreHandleTypeOpaqueWin32Kmt cudaExternalSemaphoreHandleTypeOpaqueWin32Kmt
+#define hipExternalSemaphoreHandleTypeD3D12Fence cudaExternalSemaphoreHandleTypeD3D12Fence
+#if CUDA_VERSION >= CUDA_10020
+#define hipExternalSemaphoreHandleTypeD3D11Fence cudaExternalSemaphoreHandleTypeD3D11Fence
+#define hipExternalSemaphoreHandleTypeNvSciSync cudaExternalSemaphoreHandleTypeNvSciSync
+#define hipExternalSemaphoreHandleTypeKeyedMutex cudaExternalSemaphoreHandleTypeKeyedMutex
+#define hipExternalSemaphoreHandleTypeKeyedMutexKmt cudaExternalSemaphoreHandleTypeKeyedMutexKmt
+#endif
+#if CUDA_VERSION >= CUDA_11020
+#define hipExternalSemaphoreHandleTypeTimelineSemaphoreFd cudaExternalSemaphoreHandleTypeTimelineSemaphoreFd
+#define hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32 cudaExternalSemaphoreHandleTypeTimelineSemaphoreWin32
+#endif
+
 typedef struct cudaExternalSemaphoreHandleDesc hipExternalSemaphoreHandleDesc;
 typedef cudaExternalSemaphore_t hipExternalSemaphore_t;
 typedef struct cudaExternalSemaphoreSignalParams hipExternalSemaphoreSignalParams;
@@ -1207,6 +1366,21 @@ typedef enum cudaStreamUpdateCaptureDependenciesFlags hipStreamUpdateCaptureDepe
 #define hipStreamAddCaptureDependencies cudaStreamAddCaptureDependencies
 #define hipStreamSetCaptureDependencies cudaStreamSetCaptureDependencies
 #endif
+
+#if CUDA_VERSION >= CUDA_11030
+typedef enum cudaGraphDebugDotFlags hipGraphDebugDotFlags;
+#define hipGraphDebugDotFlagsVerbose cudaGraphDebugDotFlagsVerbose
+#define hipGraphDebugDotFlagsKernelNodeParams cudaGraphDebugDotFlagsKernelNodeParams
+#define hipGraphDebugDotFlagsMemcpyNodeParams cudaGraphDebugDotFlagsMemcpyNodeParams
+#define hipGraphDebugDotFlagsMemsetNodeParams cudaGraphDebugDotFlagsMemsetNodeParams
+#define hipGraphDebugDotFlagsHostNodeParams cudaGraphDebugDotFlagsHostNodeParams
+#define hipGraphDebugDotFlagsEventNodeParams cudaGraphDebugDotFlagsEventNodeParams
+#define hipGraphDebugDotFlagsExtSemasSignalNodeParams cudaGraphDebugDotFlagsExtSemasSignalNodeParams
+#define hipGraphDebugDotFlagsExtSemasWaitNodeParams cudaGraphDebugDotFlagsExtSemasWaitNodeParams
+#define hipGraphDebugDotFlagsKernelNodeAttributes cudaGraphDebugDotFlagsKernelNodeAttributes
+#define hipGraphDebugDotFlagsHandles cudaGraphDebugDotFlagsHandles
+#endif
+
 #if CUDA_VERSION >= CUDA_10020
 #define hipMemAllocationGranularityMinimum CU_MEM_ALLOC_GRANULARITY_MINIMUM
 #define hipMemAllocationGranularityRecommended CU_MEM_ALLOC_GRANULARITY_RECOMMENDED
@@ -1656,6 +1830,14 @@ inline static const char* hipGetErrorString(hipError_t error) {
 
 inline static const char* hipGetErrorName(hipError_t error) {
     return cudaGetErrorName(hipErrorToCudaError(error));
+}
+
+inline static hipError_t hipDrvGetErrorString(hipError_t error, const char** errorString) {
+    return hipCUResultTohipError(cuGetErrorString(hipErrorToCUResult(error), errorString));
+}
+
+inline static hipError_t hipDrvGetErrorName(hipError_t error, const char** errorString) {
+    return hipCUResultTohipError(cuGetErrorName(hipErrorToCUResult(error), errorString));
 }
 
 inline static hipError_t hipGetDeviceCount(int* count) {
@@ -2184,13 +2366,13 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
 #endif
         switch (memType) {
             case cudaMemoryTypeDevice:
-                attributes->memoryType = hipMemoryTypeDevice;
+                attributes->type = hipMemoryTypeDevice;
                 break;
             case cudaMemoryTypeHost:
-                attributes->memoryType = hipMemoryTypeHost;
+                attributes->type = hipMemoryTypeHost;
                 break;
             case cudaMemoryTypeManaged:
-                attributes->memoryType = hipMemoryTypeManaged;
+                attributes->type = hipMemoryTypeManaged;
                 break;
             default:
                 return hipErrorInvalidValue;
@@ -2767,6 +2949,17 @@ inline static hipError_t hipOccupancyMaxPotentialBlockSize(int* minGridSize, int
                                                            int blockSizeLimit = 0) {
     return hipCUDAErrorTohipError(cudaOccupancyMaxPotentialBlockSize(minGridSize, blockSize, func,
                                                            dynamicSMemSize, blockSizeLimit));
+}
+
+template <typename UnaryFunction, class T>
+inline static hipError_t hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(int* min_grid_size,
+                                                                                int* block_size,
+                                                                                T func,
+                                                                                UnaryFunction block_size_to_dynamic_smem_size,
+                                                                                int block_size_limit = 0,
+                                                                                unsigned int flags = 0) {
+    return hipCUDAErrorTohipError(cudaOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(min_grid_size, block_size, func,
+                                                    block_size_to_dynamic_smem_size, block_size_limit,flags));
 }
 
 template <class T>
@@ -3380,7 +3573,34 @@ inline static hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node,
                                                    const hipHostNodeParams* pNodeParams) {
     return hipCUDAErrorTohipError(cudaGraphHostNodeSetParams(node, pNodeParams));
 }
+#if CUDA_VERSION >= CUDA_11030
+inline static hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path,
+                                               unsigned int flags) {
+    return hipCUDAErrorTohipError(cudaGraphDebugDotPrint(graph, path, flags));
+}
+#endif
+#if CUDA_VERSION >= CUDA_11000
+inline static hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc,
+                                                          hipGraphNode_t hDst) {
+    return hipCUDAErrorTohipError(cudaGraphKernelNodeCopyAttributes(hSrc, hDst));
+}
+#endif
+#if CUDA_VERSION >= CUDA_11060
+inline static hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+                                                unsigned int isEnabled) {
+    return hipCUDAErrorTohipError(cudaGraphNodeSetEnabled(hGraphExec, hNode, isEnabled));
+}
 
+inline static hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+                                                unsigned int* isEnabled) {
+    return hipCUDAErrorTohipError(cudaGraphNodeGetEnabled(hGraphExec, hNode, isEnabled));
+}
+#endif
+#if CUDA_VERSION >= CUDA_11010
+inline static hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream) {
+    return hipCUDAErrorTohipError(cudaGraphUpload(graphExec, stream));
+}
+#endif
 #endif  //__CUDACC__
 
 #endif  // HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_RUNTIME_API_H
