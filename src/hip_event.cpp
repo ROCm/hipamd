@@ -30,6 +30,19 @@ namespace hip {
 static amd::Monitor eventSetLock{"Guards global event set"};
 static std::unordered_set<hipEvent_t> eventSet;
 
+
+bool isValid(hipEvent_t event) {
+  // NULL event is always valid
+  if (event == nullptr) {
+    return true;
+  }
+  amd::ScopedLock lock(hip::eventSetLock);
+  if (hip::eventsSet.find(event) == hip::eventsSet.end()) {
+    return false;
+  }
+  return true;
+}
+
 bool Event::ready() {
   if (event_->status() != CL_COMPLETE) {
     event_->notifyCmdQueue();
@@ -360,6 +373,9 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream) {
   if (event == nullptr) {
     return hipErrorInvalidHandle;
   }
+  if (!isValid(event)) {
+    return hipErrorContextIsDestroyed;
+  }
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   amd::HostQueue* queue = hip::getQueue(stream);
   if (g_devices[e->deviceId()]->devices()[0] != &queue->device()) {
@@ -385,7 +401,9 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
   if (event == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
-
+  if (!isValid(event)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   HIP_RETURN(e->synchronize());
 }
@@ -394,7 +412,10 @@ hipError_t ihipEventQuery(hipEvent_t event) {
   if (event == nullptr) {
     return hipErrorInvalidHandle;
   }
-
+  if (!isValid(event)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   return e->query();
 }
