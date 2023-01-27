@@ -333,20 +333,14 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     MaxWavesPerSimd = 16;
   }
   size_t VgprWaves = MaxWavesPerSimd;
-  size_t maxVGPRs;
-  uint32_t VgprGranularity;
-  if (device.isa().versionMajor() <= 9) {
-    if (device.isa().versionMajor() == 9 && device.isa().versionMinor() == 0 &&
-        device.isa().versionStepping() == 10) {
-      maxVGPRs = 512;
-      VgprGranularity = 8;
-    } else {
-      maxVGPRs = 256;
-      VgprGranularity = 4;
+  uint32_t VgprGranularity = device.info().vgprAllocGranularity_;
+  size_t maxVGPRs = device.info().vgprsPerSimd_;
+  size_t wavefrontSize = wrkGrpInfo->wavefrontSize_;
+  if (device.isa().versionMajor() >= 10) {
+    if (wavefrontSize == 64) {
+      maxVGPRs = maxVGPRs >> 1;
+      VgprGranularity = VgprGranularity >> 1;
     }
-  } else {
-    maxVGPRs = 1024;
-    VgprGranularity = 8;
   }
   if (wrkGrpInfo->usedSGPRs_ > 0) {
     VgprWaves = maxVGPRs / amd::alignUp(wrkGrpInfo->usedVGPRs_, VgprGranularity);
@@ -354,19 +348,13 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 
   size_t GprWaves = VgprWaves;
   if (wrkGrpInfo->usedSGPRs_ > 0) {
-    size_t maxSGPRs;
-    if (device.isa().versionMajor() < 8) {
-      maxSGPRs = 512;
-    } else if (device.isa().versionMajor() < 10) {
-      maxSGPRs = 800;
-    } else {
-      maxSGPRs = SIZE_MAX;  // gfx10+ does not share SGPRs between waves
-    }
+    size_t maxSGPRs = device.info().sgprsPerSimd_;
     const size_t SgprWaves = maxSGPRs / amd::alignUp(wrkGrpInfo->usedSGPRs_, 16);
     GprWaves = std::min(VgprWaves, SgprWaves);
   }
-
-  const size_t alu_occupancy = device.info().simdPerCU_ * std::min(MaxWavesPerSimd, GprWaves);
+  uint32_t simdPerCU = (device.isa().versionMajor() <= 9) ? device.info().simdPerCU_
+                                                          : (wrkGrpInfo->isWGPMode_ ? 4 : 2);
+  const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
   const int alu_limited_threads = alu_occupancy * wrkGrpInfo->wavefrontSize_;
 
   int lds_occupancy_wgs = INT_MAX;
@@ -544,7 +532,9 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int* numBlocks,
   if (numBlocks == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-
+  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   hipFunction_t func = nullptr;
   hipError_t hip_error = PlatformState::instance().getStatFunc(&func, f, ihipGetDevice());
   if ((hip_error != hipSuccess) || (func == nullptr)) {
@@ -860,8 +850,11 @@ hipError_t PlatformState::getStatFunc(hipFunction_t* hfunc, const void* hostFunc
 
 hipError_t PlatformState::getStatFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction,
                                           int deviceId) {
-  if (func_attr == nullptr || hostFunction == nullptr) {
+  if (func_attr == nullptr) {
     return hipErrorInvalidValue;
+  }
+  if (hostFunction == nullptr) {
+    return hipErrorInvalidDeviceFunction;
   }
   return statCO_.getStatFuncAttr(func_attr, hostFunction, deviceId);
 }

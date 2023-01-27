@@ -158,6 +158,8 @@ hipModuleGetGlobal
 hipModuleGetTexRef
 hipModuleLaunchKernel
 hipModuleLaunchKernelExt
+hipModuleLaunchCooperativeKernel
+hipModuleLaunchCooperativeKernelMultiDevice
 hipLaunchCooperativeKernel
 hipLaunchCooperativeKernelMultiDevice
 hipHccModuleLaunchKernel
@@ -434,3 +436,7 @@ hipGraphKernelNodeCopyAttributes
 hipGraphNodeGetEnabled
 hipGraphNodeSetEnabled
 hipGraphUpload
+hipGraphAddMemAllocNode
+hipGraphMemAllocNodeGetParams
+hipGraphAddMemFreeNode
+hipGraphMemFreeNodeGetParams

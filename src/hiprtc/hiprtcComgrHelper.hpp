@@ -32,7 +32,7 @@ THE SOFTWARE.
 namespace hiprtc {
 namespace helpers {
 bool UnbundleBitCode(const std::vector<char>& bundled_bit_code, const std::string& isa,
-                    size_t& co_offset, size_t& co_size);
+                     size_t& co_offset, size_t& co_size);
 bool addCodeObjData(amd_comgr_data_set_t& input, const std::vector<char>& source,
                     const std::string& name, const amd_comgr_data_kind_t type);
 bool extractBuildLog(amd_comgr_data_set_t dataSet, std::string& buildLog);
@@ -54,7 +54,8 @@ bool dumpIsaFromBC(const amd_comgr_data_set_t isaInputs, const std::string& isa,
                    std::vector<std::string>& exeOptions, std::string name, std::string& buildLog);
 bool demangleName(const std::string& mangledName, std::string& demangledName);
 std::string handleMangledName(std::string loweredName);
-bool fillMangledNames(std::vector<char>& executable, std::vector<std::string>& mangledNames);
+bool fillMangledNames(std::vector<char>& executable,
+                      std::vector<std::string>& mangledNames, bool isBitcode);
 bool getDemangledNames(const std::vector<std::string>& mangledNames,
                      std::map<std::string, std::string>& demangledNames);
 void GenerateUniqueFileName(std::string &name);

@@ -231,7 +231,6 @@ bool RTCCompileProgram::transformOptions() {
 amd::Monitor RTCProgram::lock_("HIPRTC Program", true);
 
 bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fgpu_rdc) {
-  amd::ScopedLock lock(lock_); // Lock, because LLVM is not multi threaded
 
   if (!addSource_impl()) {
     LogError("Error in hiprtc: unable to add source code");
@@ -255,6 +254,16 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
   }
 
   if (fgpu_rdc_) {
+    std::vector<std::string> mangledNames;
+    if (!fillMangledNames(LLVMBitcode_, mangledNames, true)) {
+      LogError("Error in hiprtc: unable to fill mangled names");
+      return false;
+    }
+
+    if (!getDemangledNames(mangledNames, demangled_names_)) {
+      LogError("Error in hiprtc: unable to get demangled names");
+      return false;
+    }
     return true;
   }
 
@@ -289,7 +298,7 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
   }
 
   std::vector<std::string> mangledNames;
-  if (!fillMangledNames(executable_, mangledNames)) {
+  if (!fillMangledNames(executable_, mangledNames, false)) {
     LogError("Error in hiprtc: unable to fill mangled names");
     return false;
   }
@@ -486,10 +495,11 @@ amd_comgr_data_kind_t RTCLinkProgram::GetCOMGRDataKind(hiprtcJITInputType input_
       data_kind = AMD_COMGR_DATA_KIND_BC;
       break;
     case HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE :
-      data_kind = AMD_COMGR_DATA_KIND_BC;
+      data_kind = HIPRTC_USE_RUNTIME_UNBUNDLER 
+                  ? AMD_COMGR_DATA_KIND_BC : AMD_COMGR_DATA_KIND_BC_BUNDLE;
       break;
     case HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE :
-      data_kind = AMD_COMGR_DATA_KIND_FATBIN;
+      data_kind = AMD_COMGR_DATA_KIND_AR_BUNDLE;
       break;
     default :
       LogError("Cannot find the corresponding comgr data kind");
@@ -500,7 +510,6 @@ amd_comgr_data_kind_t RTCLinkProgram::GetCOMGRDataKind(hiprtcJITInputType input_
 }
 
 bool RTCLinkProgram::AddLinkerFile(std::string file_path, hiprtcJITInputType input_type) {
-  amd::ScopedLock lock(lock_);
   std::vector<char> llvm_bitcode;
 
   // Get the file size.
@@ -521,7 +530,7 @@ bool RTCLinkProgram::AddLinkerFile(std::string file_path, hiprtcJITInputType inp
   bc_file.close();
 
   // If this is bundled bitcode then unbundle this.
-  if (input_type == HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE) {
+  if (HIPRTC_USE_RUNTIME_UNBUNDLER && input_type == HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE) {
     if (!findIsa()) {
       return false;
     }
@@ -555,11 +564,10 @@ bool RTCLinkProgram::AddLinkerFile(std::string file_path, hiprtcJITInputType inp
 
 bool RTCLinkProgram::AddLinkerData(void* image_ptr, size_t image_size, std::string link_file_name,
                                    hiprtcJITInputType input_type) {
-  amd::ScopedLock lock(lock_);
   char* image_char_buf = reinterpret_cast<char*>(image_ptr);
   std::vector<char> llvm_bitcode;
 
-  if (input_type == HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE) {
+  if (HIPRTC_USE_RUNTIME_UNBUNDLER && input_type == HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE) {
     std::vector<char> bundled_llvm_bitcode(image_char_buf, image_char_buf + image_size);
 
     if (!findIsa()) {
@@ -593,7 +601,6 @@ bool RTCLinkProgram::AddLinkerData(void* image_ptr, size_t image_size, std::stri
 }
 
 bool RTCLinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
-  amd::ScopedLock lock(lock_);
 
   if (!findIsa()) {
     return false;

@@ -260,6 +260,21 @@ hipError_t Event::addMarker(hipStream_t stream, amd::Command* command, bool reco
   return status;
 }
 
+// ================================================================================================
+bool isValid(hipEvent_t event) {
+  // NULL event is always valid
+  if (event == nullptr) {
+    return true;
+  }
+
+  amd::ScopedLock lock(eventSetLock);
+  if (eventSet.find(event) == eventSet.end()) {
+    return false;
+  }
+
+  return true;
+}
+
 }  // namespace hip
 // ================================================================================================
 hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
@@ -329,6 +344,9 @@ hipError_t hipEventDestroy(hipEvent_t event) {
   }
 
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
+  if (e->GetCaptureStream() != nullptr) {
+    reinterpret_cast<hip::Stream*>(e->GetCaptureStream())->EraseCaptureEvent(event);
+  }
   delete e;
   HIP_RETURN(hipSuccess);
 }
@@ -386,6 +404,9 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
+  if (hip::Stream::StreamCaptureOngoing() == true) {
+    HIP_RETURN(hipErrorStreamCaptureUnsupported);
+  }
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   HIP_RETURN(e->synchronize());
 }

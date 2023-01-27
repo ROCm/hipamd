@@ -27,6 +27,8 @@ THE SOFTWARE.
 #include <cuda.h>
 #include <cuda_profiler_api.h>
 #include <cuda_fp16.h>
+#include <cuda_gl_interop.h>
+
 #include <stdio.h>
 
 #define CUDA_9000 9000
@@ -437,6 +439,7 @@ typedef struct cudaArray* hipArray_t;
 typedef struct cudaArray* hipArray_const_t;
 typedef struct cudaFuncAttributes hipFuncAttributes;
 typedef struct cudaLaunchParams hipLaunchParams;
+typedef CUDA_LAUNCH_PARAMS hipFunctionLaunchParams;
 #define hipFunction_attribute CUfunction_attribute
 #define hipPointer_attribute CUpointer_attribute
 #define hip_Memcpy2D CUDA_MEMCPY2D
@@ -539,6 +542,12 @@ typedef CUDA_RESOURCE_VIEW_DESC HIP_RESOURCE_VIEW_DESC;
 #define HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE CU_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE
 #define HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS      CU_POINTER_ATTRIBUTE_ACCESS_FLAGS
 #define HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE    CU_POINTER_ATTRIBUTE_MEMPOOL_HANDLE
+
+typedef enum cudaGraphInstantiateFlags hipGraphInstantiateFlags;
+#define hipGraphInstantiateFlagAutoFreeOnLaunch cudaGraphInstantiateFlagAutoFreeOnLaunch
+#define hipGraphInstantiateFlagUpload cudaGraphInstantiateFlagUpload
+#define hipGraphInstantiateFlagDeviceLaunch cudaGraphInstantiateFlagDeviceLaunch
+#define hipGraphInstantiateFlagUseNodePriority cudaGraphInstantiateFlagUseNodePriority
 
 #if CUDA_VERSION >= CUDA_9000
 #define __shfl(...)      __shfl_sync(0xffffffff, __VA_ARGS__)
@@ -1293,6 +1302,21 @@ typedef cudaExternalSemaphore_t hipExternalSemaphore_t;
 typedef struct cudaExternalSemaphoreSignalParams hipExternalSemaphoreSignalParams;
 typedef struct cudaExternalSemaphoreWaitParams hipExternalSemaphoreWaitParams;
 
+typedef enum cudaGLDeviceList hipGLDeviceList;
+#define hipGLDeviceListAll cudaGLDeviceListAll
+#define hipGLDeviceListCurrentFrame  cudaGLDeviceListCurrentFrame
+#define hipGLDeviceListNextFrame  cudaGLDeviceListNextFrame
+
+typedef struct cudaGraphicsResource hipGraphicsResource;
+typedef cudaGraphicsResource_t hipGraphicsResource_t;
+
+typedef enum cudaGraphicsRegisterFlags hipGraphicsRegisterFlags;
+#define hipGraphicsRegisterFlagsNone cudaGraphicsRegisterFlagsNone
+#define hipGraphicsRegisterFlagsReadOnly cudaGraphicsRegisterFlagsReadOnly
+#define hipGraphicsRegisterFlagsWriteDiscard cudaGraphicsRegisterFlagsWriteDiscard
+#define hipGraphicsRegisterFlagsSurfaceLoadStore cudaGraphicsRegisterFlagsSurfaceLoadStore
+#define hipGraphicsRegisterFlagsTextureGather cudaGraphicsRegisterFlagsTextureGather
+
 /**
  * graph types
  *
@@ -1321,6 +1345,10 @@ typedef cudaHostFn_t hipHostFn_t;
 typedef struct cudaHostNodeParams hipHostNodeParams;
 typedef struct cudaKernelNodeParams hipKernelNodeParams;
 typedef struct cudaMemsetParams hipMemsetParams;
+
+#if CUDA_VERSION >= CUDA_11040
+typedef struct cudaMemAllocNodeParams hipMemAllocNodeParams;
+#endif
 
 typedef enum cudaGraphExecUpdateResult hipGraphExecUpdateResult;
 #define hipGraphExecUpdateSuccess cudaGraphExecUpdateSuccess
@@ -1833,11 +1861,21 @@ inline static const char* hipGetErrorName(hipError_t error) {
 }
 
 inline static hipError_t hipDrvGetErrorString(hipError_t error, const char** errorString) {
-    return hipCUResultTohipError(cuGetErrorString(hipErrorToCUResult(error), errorString));
+    CUresult err = hipErrorToCUResult(error);
+    if( err == CUDA_ERROR_UNKNOWN ) {
+       return hipCUResultTohipError(cuGetErrorString((CUresult)error, errorString));
+    } else {
+       return hipCUResultTohipError(cuGetErrorString(err, errorString));
+    }
 }
 
 inline static hipError_t hipDrvGetErrorName(hipError_t error, const char** errorString) {
-    return hipCUResultTohipError(cuGetErrorName(hipErrorToCUResult(error), errorString));
+    CUresult err = hipErrorToCUResult(error);
+    if( err == CUDA_ERROR_UNKNOWN ) {
+       return hipCUResultTohipError(cuGetErrorName((CUresult)error, errorString));
+    } else {
+       return hipCUResultTohipError(cuGetErrorName(err, errorString));
+    }
 }
 
 inline static hipError_t hipGetDeviceCount(int* count) {
@@ -2797,9 +2835,27 @@ inline static hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim,
             cudaLaunchCooperativeKernel(f, gridDim, blockDim, kernelParams, sharedMemBytes, stream));
 }
 
+inline static hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX,
+                                            unsigned int gridDimY, unsigned int gridDimZ,
+                                            unsigned int blockDimX, unsigned int blockDimY,
+                                            unsigned int blockDimZ, unsigned int sharedMemBytes,
+                                            hipStream_t stream, void** kernelParams) {
+    return hipCUResultTohipError(cuLaunchCooperativeKernel(f, gridDimX, gridDimY, gridDimZ,
+                                                           blockDimX, blockDimY, blockDimZ,
+                                                           sharedMemBytes, stream,kernelParams));
+}
+
 inline static hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList,
                                                  int  numDevices, unsigned int  flags) {
     return hipCUDAErrorTohipError(cudaLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags));
+}
+
+inline static hipError_t hipModuleLaunchCooperativeKernelMultiDevice(
+                                                       hipFunctionLaunchParams* launchParamsList,
+                                                       unsigned int  numDevices,
+                                                       unsigned int  flags) {
+    return hipCUResultTohipError(cuLaunchCooperativeKernelMultiDevice(launchParamsList,
+                                                                      numDevices, flags));
 }
 
 inline static hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
@@ -2832,6 +2888,40 @@ inline static hipError_t hipExternalMemoryGetMappedBuffer(void **devPtr, hipExte
 
 inline static hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem) {
   return hipCUDAErrorTohipError(cudaDestroyExternalMemory(extMem));
+}
+
+inline static hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices, unsigned int hipDeviceCount,
+                                         hipGLDeviceList deviceList) {
+  return hipCUDAErrorTohipError(cudaGLGetDevices(pHipDeviceCount, pHipDevices, hipDeviceCount, deviceList));
+}
+
+inline static hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint buffer, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaGraphicsGLRegisterBuffer(resource, buffer, flags));
+}
+
+inline static hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint image, GLenum target, unsigned int flags) {
+  return hipCUDAErrorTohipError(cudaGraphicsGLRegisterImage(resource, image, target, flags));
+}
+
+inline static hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources, hipStream_t stream  __dparm(0)) {
+  return hipCUDAErrorTohipError(cudaGraphicsMapResources(count, resources, stream));
+}
+
+inline static hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsResource_t resource, unsigned int arrayIndex,
+                                                              unsigned int mipLevel) {
+  return hipCUDAErrorTohipError(cudaGraphicsSubResourceGetMappedArray(array, resource, arrayIndex, mipLevel));
+}
+
+inline static hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size, hipGraphicsResource_t resource) {
+  return hipCUDAErrorTohipError(cudaGraphicsResourceGetMappedPointer(devPtr, size, resource));
+}
+
+inline static hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources, hipStream_t stream  __dparm(0)) {
+  return hipCUDAErrorTohipError(cudaGraphicsUnmapResources(count, resources, stream));
+}
+
+inline static hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
+  return hipCUDAErrorTohipError(cudaGraphicsUnregisterResource(resource));
 }
 
 #if CUDA_VERSION >= CUDA_11020
@@ -3127,6 +3217,30 @@ inline static hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGrap
 inline static hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                                       unsigned long long flags) {
     return hipCUDAErrorTohipError(cudaGraphInstantiateWithFlags(pGraphExec, graph, flags));
+}
+
+inline hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                          const hipGraphNode_t* pDependencies,
+                                          size_t numDependencies,
+                                          hipMemAllocNodeParams* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphAddMemAllocNode(
+        pGraphNode, graph, pDependencies, numDependencies, pNodeParams));
+}
+
+inline hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node,
+                                                hipMemAllocNodeParams* pNodeParams) {
+    return hipCUDAErrorTohipError(cudaGraphMemAllocNodeGetParams(node, pNodeParams));
+}
+
+inline hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                         const hipGraphNode_t* pDependencies,
+                                         size_t numDependencies, void* dev_ptr) {
+    return hipCUDAErrorTohipError(cudaGraphAddMemFreeNode(
+        pGraphNode, graph, pDependencies, numDependencies, dev_ptr));
+}
+
+inline hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void* dev_ptr) {
+    return hipCUDAErrorTohipError(cudaGraphMemFreeNodeGetParams(node, dev_ptr));
 }
 #endif
 inline static hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {

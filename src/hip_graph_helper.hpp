@@ -5,7 +5,11 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p);
 hipError_t ihipMemcpy_validate(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
 
 hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src, size_t sizeBytes,
-                             hipMemcpyKind kind, amd::HostQueue& queue);
+                             hipMemcpyKind kind, amd::HostQueue& queue, bool isAsync = false);
+
+void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, amd::HostQueue& queue);
+
+bool IsHtoHMemcpy(void* dst, const void* src, hipMemcpyKind kind);
 
 hipError_t ihipLaunchKernel_validate(hipFunction_t f, uint32_t globalWorkSizeX,
                                      uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
@@ -34,7 +38,7 @@ hipError_t ihipMemsetCommand(std::vector<amd::Command*>& commands, void* dst, in
                              size_t valueSize, size_t sizeBytes, amd::HostQueue* queue);
 
 hipError_t ihipMemset3DCommand(std::vector<amd::Command*>& commands, hipPitchedPtr pitchedDevPtr,
-                               int value, hipExtent extent, amd::HostQueue* queue);
+                               int value, hipExtent extent, amd::HostQueue* queue, size_t elementSize = 1);
 
 hipError_t ihipMemcpySymbol_validate(const void* symbol, size_t sizeBytes, size_t offset,
                                      size_t& sym_size, hipDeviceptr_t& device_ptr);

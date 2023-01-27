@@ -33,7 +33,6 @@ THE SOFTWARE.
 
 #include <hip/hip_vector_types.h>
 #include <hip/amd_detail/device_library_decls.h>
-#include <hip/amd_detail/llvm_intrinsics.h>
 
 #if __HIP_CLANG_ONLY__
 extern "C" __device__ int printf(const char *fmt, ...);
@@ -337,56 +336,6 @@ static inline unsigned int __mbcnt_hi(unsigned int x, unsigned int y) {return __
 /*
 HIP specific device functions
 */
-
-__device__ static inline unsigned __hip_ds_bpermute(int index, unsigned src) {
-    union { int i; unsigned u; float f; } tmp; tmp.u = src;
-    tmp.i = __builtin_amdgcn_ds_bpermute(index, tmp.i);
-    return tmp.u;
-}
-
-__device__ static inline float __hip_ds_bpermutef(int index, float src) {
-    union { int i; unsigned u; float f; } tmp; tmp.f = src;
-    tmp.i = __builtin_amdgcn_ds_bpermute(index, tmp.i);
-    return tmp.f;
-}
-
-__device__ static inline unsigned __hip_ds_permute(int index, unsigned src) {
-    union { int i; unsigned u; float f; } tmp; tmp.u = src;
-    tmp.i = __builtin_amdgcn_ds_permute(index, tmp.i);
-    return tmp.u;
-}
-
-__device__ static inline float __hip_ds_permutef(int index, float src) {
-    union { int i; unsigned u; float f; } tmp; tmp.f = src;
-    tmp.i = __builtin_amdgcn_ds_permute(index, tmp.i);
-    return tmp.f;
-}
-
-#define __hip_ds_swizzle(src, pattern)  __hip_ds_swizzle_N<(pattern)>((src))
-#define __hip_ds_swizzlef(src, pattern) __hip_ds_swizzlef_N<(pattern)>((src))
-
-template <int pattern>
-__device__ static inline unsigned __hip_ds_swizzle_N(unsigned int src) {
-    union { int i; unsigned u; float f; } tmp; tmp.u = src;
-    tmp.i = __builtin_amdgcn_ds_swizzle(tmp.i, pattern);
-    return tmp.u;
-}
-
-template <int pattern>
-__device__ static inline float __hip_ds_swizzlef_N(float src) {
-    union { int i; unsigned u; float f; } tmp; tmp.f = src;
-    tmp.i = __builtin_amdgcn_ds_swizzle(tmp.i, pattern);
-    return tmp.f;
-}
-
-#define __hip_move_dpp(src, dpp_ctrl, row_mask, bank_mask, bound_ctrl) \
-  __hip_move_dpp_N<(dpp_ctrl), (row_mask), (bank_mask), (bound_ctrl)>((src))
-
-template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl>
-__device__ static inline int __hip_move_dpp_N(int src) {
-    return __builtin_amdgcn_mov_dpp(src, dpp_ctrl, row_mask, bank_mask,
-                                    bound_ctrl);
-}
 
 #if !defined(__HIPCC_RTC__)
 #include "amd_warp_functions.h"
@@ -808,7 +757,7 @@ inline
 void* __get_dynamicgroupbaseptr()
 {
     // Get group segment base pointer.
-    return (char*)__local_to_generic((void*)__to_local(__llvm_amdgcn_groupstaticsize()));
+    return (char*)__local_to_generic((void*)__to_local(__builtin_amdgcn_groupstaticsize()));
 }
 #else
 __device__

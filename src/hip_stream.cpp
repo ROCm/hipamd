@@ -48,11 +48,16 @@ Stream::~Stream() {
     amd::ScopedLock lock(streamSetLock);
     streamSet.erase(this);
 
-    queue_->release();
-    queue_ = nullptr;
+    // Skip queue destruction for null stream in MT. Queue worker thread can be destroyed on
+    // the app exit, during the stream destruction, causing a race condition.
+    if (!null_ || AMD_DIRECT_DISPATCH) {
+      queue_->release();
+      queue_ = nullptr;
+    }
   }
 }
 
+// ================================================================================================
 hipError_t Stream::EndCapture() {
   for (auto event : captureEvents_) {
     hip::Event* e = reinterpret_cast<hip::Event*>(event);
@@ -73,6 +78,7 @@ hipError_t Stream::EndCapture() {
 
   return hipSuccess;
 }
+
 // ================================================================================================
 bool Stream::Create() {
   amd::CommandQueue::Priority p;
@@ -203,6 +209,10 @@ void Stream::destroyAllStreams(int deviceId) {
   for (auto& it : toBeDeleted) {
     delete it;
   }
+}
+
+bool Stream::StreamCaptureOngoing(void) {
+  return (g_allCapturingStreams.empty() == true) ? false : true;
 }
 
 };// hip namespace
@@ -436,6 +446,12 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
+  if (stream != nullptr) {
+    // If still capturing return error
+    if (hip::Stream::StreamCaptureOngoing() == true) {
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+    }
+  }
   // Wait for the current host queue
   hip::getQueue(stream)->finish();
   return hipSuccess;
@@ -468,7 +484,12 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-
+  if (s->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    if (s->GetParentStream() != nullptr) {
+      reinterpret_cast<hip::Stream*>(s->GetParentStream())->EraseParallelCaptureStream(stream);
+    }
+    auto error = s->EndCapture();
+  }
   s->GetDevice()->RemoveStreamFromPools(s);
 
   amd::ScopedLock lock(g_captureStreamsLock);
@@ -486,6 +507,7 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_data) {
   CallbackData* data =  reinterpret_cast<CallbackData*>(user_data);
   int offset = data->previous_read_index % IPC_SIGNALS_PER_EVENT;
@@ -512,6 +534,12 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     return hipErrorContextIsDestroyed;
   }
 
+  if (stream != nullptr) {
+    // If still capturing return error
+    if (hip::Stream::StreamCaptureOngoing() == true) {
+      HIP_RETURN(hipErrorStreamCaptureIsolation);
+    }
+  }
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   return e->streamWait(stream, flags);
 }
@@ -534,7 +562,12 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
-
+  if (stream != nullptr) {
+    // If still capturing return error
+    if (hip::Stream::StreamCaptureOngoing() == true) {
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+    }
+  }
   amd::HostQueue* hostQueue = hip::getQueue(stream);
 
   amd::Command* command = hostQueue->getLastQueuedCommand(true);
@@ -662,6 +695,9 @@ hipError_t hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userD
 // ================================================================================================
 hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void* userData) {
   HIP_INIT_API(hipLaunchHostFunc, stream, fn, userData);
+  if (stream == nullptr) {
+    HIP_RETURN(hipErrorStreamCaptureImplicit);
+  }
   HIP_RETURN(hipLaunchHostFunc_common(stream, fn, userData));
 }
 

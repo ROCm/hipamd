@@ -46,7 +46,9 @@ endif()
 
 if(CMAKE_COMPILER_IS_GNUCC)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
 endif()
 
 option(DISABLE_DIRECT_DISPATCH "Disable Direct Dispatch" OFF)
@@ -95,7 +97,6 @@ endif()
 
 target_sources(amdhip64 PRIVATE
   cl_gl.cpp
-  cl_lqdflash_amd.cpp
   fixme.cpp
   hip_activity.cpp
   hip_code_object.cpp
@@ -181,7 +182,7 @@ if(__HIP_ENABLE_PCH)
     set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
   endif()
 
-  execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/hip_embed_pch.sh ${HIP_COMMON_INCLUDE_DIR} ${PROJECT_BINARY_DIR}/include ${PROJECT_SOURCE_DIR}/include ${HIP_LLVM_ROOT}" COMMAND_ECHO STDERR RESULT_VARIABLE EMBED_PCH_RC)
+  execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/hip_embed_pch.sh ${HIP_COMMON_INCLUDE_DIR} ${PROJECT_BINARY_DIR}/include ${PROJECT_SOURCE_DIR}/include ${HIP_LLVM_ROOT}" COMMAND_ECHO STDERR RESULT_VARIABLE EMBED_PCH_RC WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
   if (EMBED_PCH_RC AND NOT EMBED_PCH_RC EQUAL 0)
     message(FATAL_ERROR "Failed to embed PCH")
   endif()

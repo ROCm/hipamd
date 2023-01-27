@@ -464,9 +464,7 @@ hipError_t hipDeviceGetSharedMemConfig ( hipSharedMemConfig * pConfig ) {
 hipError_t hipDeviceReset ( void ) {
   HIP_INIT_API(hipDeviceReset);
 
-  hip::Device* dev = hip::getCurrentDevice();
-  hip::Stream::destroyAllStreams(dev->deviceId());
-  amd::MemObjMap::Purge(dev->devices()[0]);
+  hip::getCurrentDevice()->Reset();
 
   HIP_RETURN(hipSuccess);
 }
@@ -488,6 +486,11 @@ hipError_t hipDeviceSetLimit ( hipLimit_t limit, size_t value ) {
   case hipLimitStackSize :
     // need to query device size and take action
     if (!hip::getCurrentDevice()->devices()[0]->UpdateStackSize(value)) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    break;
+  case hipLimitMallocHeapSize:
+    if (!hip::getCurrentDevice()->devices()[0]->UpdateInitialHeapSize(value)) {
       HIP_RETURN(hipErrorInvalidValue);
     }
     break;
@@ -513,6 +516,10 @@ hipError_t hipDeviceSynchronize ( void ) {
 
   if (!queue) {
     HIP_RETURN(hipErrorOutOfMemory);
+  }
+
+  if (hip::Stream::StreamCaptureOngoing() == true) {
+    HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
 
   queue->finish();

@@ -41,7 +41,9 @@ static uint64_t ElfSize(const void* emi) { return amd::Elf::getElfSize(emi); }
 
 hipError_t hipModuleUnload(hipModule_t hmod) {
   HIP_INIT_API(hipModuleUnload, hmod);
-
+  if (hmod == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
   HIP_RETURN(PlatformState::instance().unloadModule(hmod));
 }
 
@@ -53,7 +55,6 @@ hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
 
 hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
   HIP_INIT_API(hipModuleLoadData, module, image);
-
   HIP_RETURN(PlatformState::instance().loadModule(module, 0, image));
 }
 
@@ -61,7 +62,6 @@ hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned 
                                hipJitOption* options, void** optionsValues) {
   /* TODO: Pass options to Program */
   HIP_INIT_API(hipModuleLoadDataEx, module, image);
-
   HIP_RETURN(PlatformState::instance().loadModule(module, 0, image));
 }
 
@@ -72,8 +72,11 @@ extern hipError_t __hipExtractCodeObjectFromFatBinary(
 hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod, const char* name) {
   HIP_INIT_API(hipModuleGetFunction, hfunc, hmod, name);
 
-  if (hfunc == nullptr || name == nullptr) {
+  if (hfunc == nullptr || name == nullptr || strlen(name) == 0) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hmod == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
   if (hipSuccess != PlatformState::instance().getDynFunc(hfunc, hmod, name)) {
@@ -90,10 +93,13 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
 
   if (dptr == nullptr || bytes == nullptr) {
     // If either is nullptr, ignore it
-    return hipSuccess;
+    HIP_RETURN(hipSuccess);
   }
-  if (name == nullptr) {
-    return hipErrorInvalidValue;
+  if ((dptr == nullptr && bytes == nullptr) || name == nullptr || strlen(name) == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hmod == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   /* Get address and size for the global symbol */
   if (hipSuccess != PlatformState::instance().getDynGlobalVar(name, hmod, dptr, bytes)) {
@@ -108,7 +114,7 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
 hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunction_t hfunc) {
   HIP_INIT_API(hipFuncGetAttribute, value, attrib, hfunc);
 
-  if ((value == nullptr) || (hfunc == nullptr)) {
+  if ((value == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -218,12 +224,19 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, uint32_t globalWorkSizeX,
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
+  const auto& info = device->info();
+  if (sharedMemBytes > info.localMemSizePerCU_) { //sharedMemPerBlock
+    return hipErrorInvalidValue;
+  }
   // Make sure dispatch doesn't exceed max workgroup size limit
   if (blockDimX * blockDimY * blockDimZ > device->info().maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
   amd::Kernel* kernel = function->kernel();
+  if (!kernel->getDeviceKernel(*device)) {
+    return hipErrorInvalidDevice;
+  }
   // Make sure the launch params are not larger than if specified launch_bounds
   // If it exceeds, then return a failure
   if (blockDimX * blockDimY * blockDimZ >
@@ -267,7 +280,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, uint32_t globalWorkSizeX,
   if (extra != nullptr) {
     if (extra[0] != HIP_LAUNCH_PARAM_BUFFER_POINTER || extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE ||
         extra[4] != HIP_LAUNCH_PARAM_END) {
-      return hipErrorNotInitialized;
+      return hipErrorInvalidValue;
     }
     kernargs = reinterpret_cast<address>(extra[1]);
   }
@@ -343,7 +356,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
 
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");
-    return hipErrorInvalidImage;
+    return hipErrorInvalidResourceHandle;
   }
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
   amd::Kernel* kernel = function->kernel();
@@ -391,6 +404,10 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   HIP_INIT_API(hipModuleLaunchKernel, f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY,
                blockDimZ, sharedMemBytes, hStream, kernelParams, extra);
 
+  if (!hip::isValid(hStream)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   STREAM_CAPTURE(hipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
                  blockDimY, blockDimZ, sharedMemBytes, kernelParams, extra);
 
@@ -417,6 +434,10 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
   HIP_INIT_API(hipExtModuleLaunchKernel, f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
                localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream,
                kernelParams, extra, startEvent, stopEvent, flags);
+
+  if (!hip::isValid(hStream)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
 
   STREAM_CAPTURE(hipExtModuleLaunchKernel, hStream, f, globalWorkSizeX, globalWorkSizeY,
                  globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,
@@ -456,6 +477,162 @@ hipError_t hipModuleLaunchKernelExt(hipFunction_t f, uint32_t globalWorkSizeX,
                                     extra, startEvent, stopEvent));
 }
 
+hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX,
+                                            unsigned int gridDimY, unsigned int gridDimZ,
+                                            unsigned int blockDimX, unsigned int blockDimY,
+                                            unsigned int blockDimZ, unsigned int sharedMemBytes,
+                                            hipStream_t stream, void** kernelParams) {
+  HIP_INIT_API(hipModuleLaunchCooperativeKernel, f, gridDimX, gridDimY, gridDimZ, blockDimX,
+               blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams);
+
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  size_t globalWorkSizeX = static_cast<size_t>(gridDimX) * blockDimX;
+  size_t globalWorkSizeY = static_cast<size_t>(gridDimY) * blockDimY;
+  size_t globalWorkSizeZ = static_cast<size_t>(gridDimZ) * blockDimZ;
+  if (globalWorkSizeX > std::numeric_limits<uint32_t>::max() ||
+      globalWorkSizeY > std::numeric_limits<uint32_t>::max() ||
+      globalWorkSizeZ > std::numeric_limits<uint32_t>::max()) {
+    HIP_RETURN(hipErrorInvalidConfiguration);
+  }
+  HIP_RETURN(ihipModuleLaunchKernel(f, static_cast<uint32_t>(globalWorkSizeX),
+                  static_cast<uint32_t>(globalWorkSizeY),
+                  static_cast<uint32_t>(globalWorkSizeZ), blockDimX, blockDimY,
+                  blockDimZ, sharedMemBytes, stream, kernelParams, nullptr, nullptr,
+                  nullptr, 0, amd::NDRangeKernelCommand::CooperativeGroups));
+}
+
+hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList,
+                                                       unsigned int  numDevices,
+                                                       unsigned int  flags,
+                                                       uint32_t extFlags) {
+  int numActiveGPUs = 0;
+  hipError_t result = hipSuccess;
+  result = ihipDeviceGetCount(&numActiveGPUs);
+
+  if ((numDevices == 0) || (numDevices > numActiveGPUs)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((flags < 0) || (flags > hipCooperativeLaunchMultiDeviceNoPostSync)) {
+    return hipErrorInvalidValue;
+  }
+
+  uint64_t allGridSize = 0;
+  std::vector<const amd::Device*> mgpu_list(numDevices);
+
+  for (int i = 0; i < numDevices; ++i) {
+    uint32_t blockDims = 0;
+    const hipFunctionLaunchParams& launch = launchParamsList[i];
+    blockDims = launch.blockDimX * launch.blockDimY * launch.blockDimZ;
+    allGridSize += launch.gridDimX * launch.gridDimY * launch.gridDimZ * blockDims;
+
+    // Make sure block dimensions are valid
+    if (0 == blockDims) {
+      return hipErrorInvalidConfiguration;
+    }
+    if (launch.hStream != nullptr) {
+      // Validate devices to make sure it dosn't have duplicates
+      amd::HostQueue* queue = reinterpret_cast<hip::Stream*>(launch.hStream)->asHostQueue();
+      auto device = &queue->vdev()->device();
+      for (int j = 0; j < numDevices; ++j) {
+        if (mgpu_list[j] == device) {
+          return hipErrorInvalidDevice;
+        }
+      }
+      mgpu_list[i] = device;
+    } else {
+      return hipErrorInvalidResourceHandle;
+    }
+  }
+  uint64_t prevGridSize = 0;
+  uint32_t firstDevice = 0;
+
+  // Sync the execution streams on all devices
+  if ((flags & hipCooperativeLaunchMultiDeviceNoPreSync) == 0) {
+    for (int i = 0; i < numDevices; ++i) {
+      amd::HostQueue* queue =
+          reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream)->asHostQueue();
+      queue->finish();
+    }
+  }
+
+  for (int i = 0; i < numDevices; ++i) {
+    const hipFunctionLaunchParams& launch = launchParamsList[i];
+    amd::HostQueue* queue = reinterpret_cast<hip::Stream*>(launch.hStream)->asHostQueue();
+
+    if (i == 0) {
+      // The order of devices in the launch may not match the order in the global array
+      for (size_t dev = 0; dev < g_devices.size(); ++dev) {
+        // Find the matching device
+        if (&queue->vdev()->device() == g_devices[dev]->devices()[0]) {
+          // Save ROCclr index of the first device in the launch
+          firstDevice = queue->vdev()->device().index();
+          break;
+        }
+      }
+    }
+
+    size_t globalWorkSizeX = static_cast<size_t>(launch.gridDimX) * launch.blockDimX;
+    size_t globalWorkSizeY = static_cast<size_t>(launch.gridDimY) * launch.blockDimY;
+    size_t globalWorkSizeZ = static_cast<size_t>(launch.gridDimZ) * launch.blockDimZ;
+    if (globalWorkSizeX > std::numeric_limits<uint32_t>::max() ||
+        globalWorkSizeY > std::numeric_limits<uint32_t>::max() ||
+        globalWorkSizeZ > std::numeric_limits<uint32_t>::max()) {
+      return hipErrorInvalidConfiguration;
+    }
+    result = ihipModuleLaunchKernel(
+        launch.function, static_cast<uint32_t>(globalWorkSizeX),
+        static_cast<uint32_t>(globalWorkSizeY),
+        static_cast<uint32_t>(globalWorkSizeZ), launch.blockDimX, launch.blockDimY,
+        launch.blockDimZ, launch.sharedMemBytes, launch.hStream, launch.kernelParams,
+        nullptr, nullptr, nullptr, flags, extFlags,
+        i, numDevices, prevGridSize, allGridSize, firstDevice);
+    if (result != hipSuccess) {
+      break;
+    }
+    prevGridSize += globalWorkSizeX * globalWorkSizeY * globalWorkSizeZ;
+  }
+
+  // Sync the execution streams on all devices
+  if ((flags & hipCooperativeLaunchMultiDeviceNoPostSync) == 0) {
+    for (int i = 0; i < numDevices; ++i) {
+      amd::HostQueue* queue =
+          reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream)->asHostQueue();
+      queue->finish();
+    }
+  }
+
+  return result;
+}
+
+hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList,
+                                                       unsigned int  numDevices,
+                                                       unsigned int  flags) {
+  HIP_INIT_API(hipModuleLaunchCooperativeKernelMultiDevice, launchParamsList, numDevices, flags);
+
+  if (launchParamsList == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Validate all streams passed by user
+  for (int i = 0; i < numDevices; ++i) {
+    if (!hip::isValid(launchParamsList[i].hStream)) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  HIP_RETURN(ihipModuleLaunchCooperativeKernelMultiDevice(
+      launchParamsList,
+      numDevices,
+      flags,
+      (amd::NDRangeKernelCommand::CooperativeGroups |
+      amd::NDRangeKernelCommand::CooperativeMultiDeviceGroups)));
+
+}
+
 extern "C" hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
                                              void** args, size_t sharedMemBytes,
                                              hipStream_t stream) {
@@ -482,6 +659,11 @@ extern "C" hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim,
                                          hipEvent_t startEvent, hipEvent_t stopEvent, int flags) {
   HIP_INIT_API(hipExtLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes,
                stream, startEvent, stopEvent, flags);
+
+  if (!hip::isValid(stream) || !hip::isValid(startEvent) || !hip::isValid(stopEvent)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   STREAM_CAPTURE(hipExtLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes,
                  startEvent, stopEvent, flags);
   HIP_RETURN(ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream,
@@ -498,14 +680,17 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   hipFunction_t func = nullptr;
   int deviceId = hip::Stream::DeviceId(hStream);
   HIP_RETURN_ONFAIL(PlatformState::instance().getStatFunc(&func, f, deviceId));
+  const amd::Device* device = g_devices[deviceId]->devices()[0];
   size_t globalWorkSizeX = static_cast<size_t>(gridDim.x) * blockDim.x;
   size_t globalWorkSizeY = static_cast<size_t>(gridDim.y) * blockDim.y;
   size_t globalWorkSizeZ = static_cast<size_t>(gridDim.z) * blockDim.z;
   if (globalWorkSizeX > std::numeric_limits<uint32_t>::max() ||
       globalWorkSizeY > std::numeric_limits<uint32_t>::max() ||
-      globalWorkSizeZ > std::numeric_limits<uint32_t>::max()) {
-    return hipErrorInvalidConfiguration;
+      globalWorkSizeZ > std::numeric_limits<uint32_t>::max() ||
+      (blockDim.x * blockDim.y * blockDim.z > device->info().maxWorkGroupSize_)) {
+    return HIP_RETURN(hipErrorInvalidConfiguration);
   }
+
   return ihipModuleLaunchKernel(func, static_cast<uint32_t>(globalWorkSizeX),
                                 static_cast<uint32_t>(globalWorkSizeY),
                                 static_cast<uint32_t>(globalWorkSizeZ), blockDim.x, blockDim.y,
@@ -532,61 +717,19 @@ hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 bloc
 
 hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
                                                   unsigned int flags, uint32_t extFlags) {
-  int numActiveGPUs = 0;
-  hipError_t result = hipSuccess;
-  result = ihipDeviceGetCount(&numActiveGPUs);
-
-  if ((numDevices > numActiveGPUs) || (launchParamsList == nullptr)) {
+  if (launchParamsList == nullptr) {
     return hipErrorInvalidValue;
   }
-  // Validate all streams passed by user
+
+  std::vector<hipFunctionLaunchParams> functionLaunchParamsList(numDevices);
+  // Convert hipLaunchParams to hipFunctionLaunchParams
   for (int i = 0; i < numDevices; ++i) {
-    if (!hip::isValid(launchParamsList[i].stream)) {
+    hipLaunchParams& launch = launchParamsList[i];
+    // Validate stream passed by user
+    if (!hip::isValid(launch.stream)) {
       return hipErrorInvalidValue;
     }
-  }
 
-  uint64_t allGridSize = 0;
-  std::vector<const amd::Device*> mgpu_list(numDevices);
-
-  for (int i = 0; i < numDevices; ++i) {
-    uint32_t blockDims = 0;
-    const hipLaunchParams& launch = launchParamsList[i];
-    blockDims = launch.blockDim.x * launch.blockDim.y * launch.blockDim.z;
-    allGridSize += launch.gridDim.x * launch.gridDim.y * launch.gridDim.z * blockDims;
-
-    // Make sure block dimensions are valid
-    if (0 == blockDims) {
-      return hipErrorInvalidConfiguration;
-    }
-    if (launch.stream != nullptr) {
-      // Validate devices to make sure it dosn't have duplicates
-      amd::HostQueue* queue = reinterpret_cast<hip::Stream*>(launch.stream)->asHostQueue();
-      auto device = &queue->vdev()->device();
-      for (int j = 0; j < numDevices; ++j) {
-        if (mgpu_list[j] == device) {
-          return hipErrorInvalidDevice;
-        }
-      }
-      mgpu_list[i] = device;
-    } else {
-      return hipErrorInvalidResourceHandle;
-    }
-  }
-  uint64_t prevGridSize = 0;
-  uint32_t firstDevice = 0;
-
-  // Sync the execution streams on all devices
-  if ((flags & hipCooperativeLaunchMultiDeviceNoPreSync) == 0) {
-    for (int i = 0; i < numDevices; ++i) {
-      amd::HostQueue* queue =
-          reinterpret_cast<hip::Stream*>(launchParamsList[i].stream)->asHostQueue();
-      queue->finish();
-    }
-  }
-
-  for (int i = 0; i < numDevices; ++i) {
-    const hipLaunchParams& launch = launchParamsList[i];
     amd::HostQueue* queue = reinterpret_cast<hip::Stream*>(launch.stream)->asHostQueue();
     hipFunction_t func = nullptr;
     // The order of devices in the launch may not match the order in the global array
@@ -594,46 +737,29 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
       // Find the matching device and request the kernel function
       if (&queue->vdev()->device() == g_devices[dev]->devices()[0]) {
         IHIP_RETURN_ONFAIL(PlatformState::instance().getStatFunc(&func, launch.func, dev));
-        // Save ROCclr index of the first device in the launch
-        if (i == 0) {
-          firstDevice = queue->vdev()->device().index();
-        }
         break;
       }
     }
     if (func == nullptr) {
-      result = hipErrorInvalidDeviceFunction;
-      HIP_RETURN(result);
+      return hipErrorInvalidDeviceFunction;
     }
-    size_t globalWorkSizeX = static_cast<size_t>(launch.gridDim.x) * launch.blockDim.x;
-    size_t globalWorkSizeY = static_cast<size_t>(launch.gridDim.y) * launch.blockDim.y;
-    size_t globalWorkSizeZ = static_cast<size_t>(launch.gridDim.z) * launch.blockDim.z;
-    if (globalWorkSizeX > std::numeric_limits<uint32_t>::max() ||
-        globalWorkSizeY > std::numeric_limits<uint32_t>::max() ||
-        globalWorkSizeZ > std::numeric_limits<uint32_t>::max()) {
-      HIP_RETURN(hipErrorInvalidConfiguration);
-    }
-    result = ihipModuleLaunchKernel(
-        func, static_cast<uint32_t>(globalWorkSizeX), static_cast<uint32_t>(globalWorkSizeY),
-        static_cast<uint32_t>(globalWorkSizeZ), launch.blockDim.x, launch.blockDim.y,
-        launch.blockDim.z, launch.sharedMem, launch.stream, launch.args, nullptr, nullptr, nullptr,
-        flags, extFlags, i, numDevices, prevGridSize, allGridSize, firstDevice);
-    if (result != hipSuccess) {
-      break;
-    }
-    prevGridSize += globalWorkSizeX * globalWorkSizeY * globalWorkSizeZ;
+
+    functionLaunchParamsList[i].function = func;
+    functionLaunchParamsList[i].gridDimX = launch.gridDim.x;
+    functionLaunchParamsList[i].gridDimY = launch.gridDim.y;
+    functionLaunchParamsList[i].gridDimZ = launch.gridDim.z;
+    functionLaunchParamsList[i].blockDimX = launch.blockDim.x;
+    functionLaunchParamsList[i].blockDimY = launch.blockDim.y;
+    functionLaunchParamsList[i].blockDimZ = launch.blockDim.z;
+    functionLaunchParamsList[i].sharedMemBytes = launch.sharedMem;
+    functionLaunchParamsList[i].hStream = launch.stream;
+    functionLaunchParamsList[i].kernelParams = launch.args;
   }
 
-  // Sync the execution streams on all devices
-  if ((flags & hipCooperativeLaunchMultiDeviceNoPostSync) == 0) {
-    for (int i = 0; i < numDevices; ++i) {
-      amd::HostQueue* queue =
-          reinterpret_cast<hip::Stream*>(launchParamsList[i].stream)->asHostQueue();
-      queue->finish();
-    }
-  }
-
-  return result;
+  return ihipModuleLaunchCooperativeKernelMultiDevice(functionLaunchParamsList.data(),
+                                                      functionLaunchParamsList.size(),
+                                                      flags,
+                                                      extFlags);
 }
 
 hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
@@ -657,9 +783,13 @@ hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const
   HIP_INIT_API(hipModuleGetTexRef, texRef, hmod, name);
 
   /* input args check */
-  if ((texRef == nullptr) || (name == nullptr)) {
+  if ((texRef == nullptr) || (name == nullptr) || (strlen(name) == 0)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  if (hmod == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   const device::Info& info = device->info();
   if (!info.imageSupport_) {

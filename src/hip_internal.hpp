@@ -50,12 +50,13 @@
 
 /*! IHIP IPC MEMORY Structure */
 #define IHIP_IPC_MEM_HANDLE_SIZE   32
-#define IHIP_IPC_MEM_RESERVED_SIZE LP64_SWITCH(24,16)
+#define IHIP_IPC_MEM_RESERVED_SIZE LP64_SWITCH(20,12)
 
 typedef struct ihipIpcMemHandle_st {
   char ipc_handle[IHIP_IPC_MEM_HANDLE_SIZE];  ///< ipc memory handle on ROCr
   size_t psize;
   size_t poffset;
+  int owners_process_id;
   char reserved[IHIP_IPC_MEM_RESERVED_SIZE];
 } ihipIpcMemHandle_t;
 
@@ -67,10 +68,6 @@ typedef struct ihipIpcEventHandle_st {
     //char reserved[IHIP_IPC_EVENT_RESERVED_SIZE];
     char shmem_name[IHIP_IPC_EVENT_HANDLE_SIZE];
 }ihipIpcEventHandle_t;
-
-#ifdef _WIN32
-  inline int getpid() { return _getpid(); }
-#endif
 
 const char* ihipGetErrorName(hipError_t hip_error);
 
@@ -171,7 +168,7 @@ static  amd::Monitor g_hipInitlock{"hipInit lock"};
     }                                                                                              \
     amd::ScopedLock lock(g_captureStreamsLock);                                                    \
     if (g_captureStreams.size() != 0) {                                                            \
-        HIP_RETURN(hipErrorStreamCaptureUnsupported);                                              \
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
     }                                                                                              \
   }
 
@@ -253,7 +250,7 @@ namespace hip {
     bool originStream_;
     /// Origin sream has no parent. Parent stream for the derived captured streams with event
     /// dependencies
-    hipStream_t parentStream_;
+    hipStream_t parentStream_ = nullptr;
     /// Last graph node captured in the stream
     std::vector<hipGraphNode_t> lastCapturedNodes_;
     /// dependencies removed via API hipStreamUpdateCaptureDependencies
@@ -261,7 +258,7 @@ namespace hip {
     /// Derived streams/Paralell branches from the origin stream
     std::vector<hipStream_t> parallelCaptureStreams_;
     /// Capture events
-    std::vector<hipEvent_t> captureEvents_;
+    std::unordered_set<hipEvent_t> captureEvents_;
     unsigned long long captureID_;
   public:
     Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
@@ -300,6 +297,9 @@ namespace hip {
 
     /// Destroy all streams on a given device
     static void destroyAllStreams(int deviceId);
+
+    /// Check Stream Capture status to make sure it is done
+    static bool StreamCaptureOngoing(void);
 
     /// Returns capture status of the current stream
     hipStreamCaptureStatus GetCaptureStatus() const { return captureStatus_; }
@@ -364,8 +364,20 @@ namespace hip {
     }
     /// Get Capture ID
     unsigned long long GetCaptureID() { return captureID_; }
-    void SetCaptureEvent(hipEvent_t e) { captureEvents_.push_back(e); }
+    void SetCaptureEvent(hipEvent_t e) { captureEvents_.emplace(e); }
+    void EraseCaptureEvent(hipEvent_t e) {
+      auto it = captureEvents_.find(e);
+      if (it != captureEvents_.end()) {
+        captureEvents_.erase(it);
+      }
+    }
     void SetParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.push_back(s); }
+    void EraseParallelCaptureStream(hipStream_t s) {
+      auto it = std::find(parallelCaptureStreams_.begin(), parallelCaptureStreams_.end(), s);
+      if (it != parallelCaptureStreams_.end()) {
+        parallelCaptureStreams_.erase(it);
+      }
+    }
   };
 
   /// HIP Device class
@@ -397,7 +409,7 @@ namespace hip {
     Device(amd::Context* ctx, int devId): context_(ctx),
         deviceId_(devId),
         null_stream_(this, Stream::Priority::Normal, 0, true),
-         flags_(hipDeviceScheduleSpin),
+        flags_(hipDeviceScheduleSpin),
         isActive_(false),
         default_mem_pool_(nullptr),
         current_mem_pool_(nullptr)
@@ -431,6 +443,8 @@ namespace hip {
     }
     unsigned int getFlags() const { return flags_; }
     void setFlags(unsigned int flags) { flags_ = flags; }
+    void Reset();
+
     amd::HostQueue* NullStream(bool skip_alloc = false);
     Stream* GetNullStream();
 
@@ -519,6 +533,7 @@ namespace hip {
   int getDeviceID(amd::Context& ctx);
   /// Check if stream is valid
   extern bool isValid(hipStream_t& stream);
+  extern bool isValid(hipEvent_t event);
   extern amd::Monitor hipArraySetLock;
   extern std::unordered_set<hipArray*> hipArraySet;
 }; // namespace hip
@@ -535,7 +550,7 @@ extern int ihipGetDevice();
 
 extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
 extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size = 0);
-extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size);
+extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size = 0);
 extern void getStreamPerThread(hipStream_t& stream);
 extern hipStream_t getPerThreadDefaultStream();
 extern hipError_t ihipUnbindTexture(textureReference* texRef);
@@ -554,4 +569,5 @@ constexpr bool kMarkerDisableFlush = true;   //!< Avoids command batch flush in 
 
 extern std::vector<hip::Stream*> g_captureStreams;
 extern amd::Monitor g_captureStreamsLock;
+extern std::unordered_set<hip::Stream*> g_allCapturingStreams;
 #endif // HIP_SRC_HIP_INTERNAL_H

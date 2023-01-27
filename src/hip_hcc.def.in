@@ -158,6 +158,8 @@ hipModuleGetGlobal
 hipModuleGetTexRef
 hipModuleLaunchKernel
 hipModuleLaunchKernelExt
+hipModuleLaunchCooperativeKernel
+hipModuleLaunchCooperativeKernelMultiDevice
 hipLaunchCooperativeKernel
 hipLaunchCooperativeKernelMultiDevice
 hipHccModuleLaunchKernel
@@ -175,6 +177,7 @@ hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
 hipFuncGetAttribute
 hipFuncGetAttributes
 hipPeekAtLastError
+hipPointerSetAttribute
 hipPointerGetAttributes
 hipProfilerStart
 hipProfilerStop
@@ -448,3 +451,7 @@ hipGraphKernelNodeCopyAttributes
 hipGraphNodeGetEnabled
 hipGraphNodeSetEnabled
 hipGraphUpload
+hipGraphAddMemAllocNode
+hipGraphMemAllocNodeGetParams
+hipGraphAddMemFreeNode
+hipGraphMemFreeNodeGetParams

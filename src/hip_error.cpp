@@ -335,6 +335,10 @@ const char *ihipGetErrorString(hipError_t hip_error) {
             return "attempt to terminate a thread-local capture sequence from another thread";
         case hipErrorGraphExecUpdateFailure:
             return "the graph update was not performed because it included changes which violated constraints specific to instantiated graph update";
+        case hipErrorRuntimeMemory:
+            return "runtime memory call returned error";
+        case hipErrorRuntimeOther:
+            return "runtime call other than memory returned error";
         case hipErrorUnknown:
         default:
             return "unknown error";
@@ -357,7 +361,7 @@ hipError_t hipDrvGetErrorName(hipError_t hip_error, const char** errStr)
     return hipErrorInvalidValue;
   }
   *errStr = ihipGetErrorName(hip_error);
-  if (!strcmp( *errStr, "hipErrorUnknown")) {
+  if (hip_error == hipErrorUnknown || strcmp( *errStr, "hipErrorUnknown") != 0) {
     return hipSuccess;
   } else {
     return hipErrorInvalidValue;
@@ -370,7 +374,7 @@ hipError_t hipDrvGetErrorString(hipError_t hip_error, const char** errStr)
     return hipErrorInvalidValue;
   }
   *errStr = ihipGetErrorString(hip_error);
-  if (!strcmp( *errStr, "unkown error")) {
+  if (hip_error == hipErrorUnknown || strcmp( *errStr, "unknown error") != 0) {
     return hipSuccess;
   } else {
     return hipErrorInvalidValue;
