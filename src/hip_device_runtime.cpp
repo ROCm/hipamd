@@ -506,7 +506,7 @@ hipError_t hipDeviceSetSharedMemConfig ( hipSharedMemConfig config ) {
 
   // No way to set cache config yet.
 
-  HIP_RETURN(hipErrorNotSupported);
+  HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipDeviceSynchronize ( void ) {
