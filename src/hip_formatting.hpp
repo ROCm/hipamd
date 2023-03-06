@@ -342,7 +342,7 @@ inline std::ostream& operator<<(std::ostream& os, const hiprtcResult& s) {
   return os;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const hipJitOption& s) {
+inline std::ostream& operator<<(std::ostream& os, const hiprtcJIT_option& s) {
   switch (s) {
     case HIPRTC_JIT_MAX_REGISTERS:
       os << "HIPRTC_JIT_MAX_REGISTERS";
