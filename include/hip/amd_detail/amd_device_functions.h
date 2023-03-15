@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -444,7 +444,8 @@ __device__ static inline unsigned long long int __double2ull_ru(double x) {
 __device__ static inline unsigned long long int __double2ull_rz(double x) {
   return (unsigned long long int)x;
 }
-
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
 __device__ static inline long long int __double_as_longlong(double x) {
     static_assert(sizeof(long long) == sizeof(double), "");
 
@@ -453,6 +454,7 @@ __device__ static inline long long int __double_as_longlong(double x) {
 
     return tmp;
 }
+#pragma clang diagnostic pop
 
 /*
 __device__ unsigned short __float2half_rn(float x);
@@ -775,21 +777,21 @@ __device__
 inline
 static void __threadfence()
 {
-  __atomic_work_item_fence(0, __memory_order_seq_cst, __memory_scope_device);
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent");
 }
 
 __device__
 inline
 static void __threadfence_block()
 {
-  __atomic_work_item_fence(0, __memory_order_seq_cst, __memory_scope_work_group);
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup");
 }
 
 __device__
 inline
 static void __threadfence_system()
 {
-  __atomic_work_item_fence(0, __memory_order_seq_cst, __memory_scope_all_svm_devices);
+    __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "");
 }
 
 // abort
@@ -862,14 +864,11 @@ void __assertfail()
 }
 #endif /* defined(_WIN32) || defined(_WIN64) */
 
-__device__
-inline
-static void __work_group_barrier(__cl_mem_fence_flags flags, __memory_scope scope)
-{
+__device__ inline static void __work_group_barrier(__cl_mem_fence_flags flags) {
     if (flags) {
-        __atomic_work_item_fence(flags, __memory_order_release, scope);
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
         __builtin_amdgcn_s_barrier();
-        __atomic_work_item_fence(flags, __memory_order_acquire, scope);
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
     } else {
         __builtin_amdgcn_s_barrier();
     }
@@ -879,7 +878,7 @@ __device__
 inline
 static void __barrier(int n)
 {
-  __work_group_barrier((__cl_mem_fence_flags)n, __memory_scope_work_group);
+  __work_group_barrier((__cl_mem_fence_flags)n);
 }
 
 __device__
@@ -922,7 +921,7 @@ int __syncthreads_or(int predicate)
    PIPE_ID     7:6     Pipeline from which the wave was dispatched.
    CU_ID       11:8    Compute Unit the wave is assigned to.
    SH_ID       12      Shader Array (within an SE) the wave is assigned to.
-   SE_ID       14:13   Shader Engine the wave is assigned to.
+   SE_ID       15:13   Shader Engine the wave is assigned to.
    TG_ID       19:16   Thread-group ID
    VM_ID       23:20   Virtual Memory ID
    QUEUE_ID    26:24   Queue from which this wave was dispatched.
@@ -935,7 +934,7 @@ int __syncthreads_or(int predicate)
 #define HW_ID_CU_ID_SIZE    4
 #define HW_ID_CU_ID_OFFSET  8
 
-#define HW_ID_SE_ID_SIZE    2
+#define HW_ID_SE_ID_SIZE    3
 #define HW_ID_SE_ID_OFFSET  13
 
 /*

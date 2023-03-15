@@ -1569,7 +1569,7 @@ THE SOFTWARE.
             __half hrcp(__half x)
             {
                 return __half_raw{
-                    __llvm_amdgcn_rcp_f16(static_cast<__half_raw>(x).data)};
+                    static_cast<_Float16>(__builtin_amdgcn_rcph(static_cast<__half_raw>(x).data))};
             }
             inline
             __device__
@@ -1672,7 +1672,10 @@ THE SOFTWARE.
             __half2 h2log10(__half2 x) { return __ocml_log10_2f16(x); }
             inline
             __HOST_DEVICE__
-            __half2 h2rcp(__half2 x) { return __llvm_amdgcn_rcp_2f16(x); }
+            __half2 h2rcp(__half2 x) {
+                return _Float16_2{static_cast<_Float16>(__builtin_amdgcn_rcph(x.x)),
+                                  static_cast<_Float16>(__builtin_amdgcn_rcph(x.y))};
+            }
             inline
             __HOST_DEVICE__
             __half2 h2rsqrt(__half2 x) { return __ocml_rsqrt_2f16(x); }
@@ -1707,6 +1710,66 @@ THE SOFTWARE.
             using half = __half;
             using half2 = __half2;
         #endif
+        #if !defined(__HIPCC_RTC__)
+        #include "amd_device_functions.h"
+        #include "amd_warp_functions.h"
+            __device__
+            inline
+            __half __shfl(__half var, int src_lane, int width = warpSize) {
+                union { int i; __half h; } tmp; tmp.h = var;
+                tmp.i = __shfl(tmp.i, src_lane, width);
+                return tmp.h;
+            }
+            __device__
+            inline
+            __half2 __shfl(__half2 var, int src_lane, int width = warpSize) {
+                union { int i; __half2 h; } tmp; tmp.h = var;
+                tmp.i = __shfl(tmp.i, src_lane, width);
+                return tmp.h;
+            }
+            __device__
+            inline
+            __half __shfl_up(__half var, unsigned int lane_delta, int width = warpSize) {
+                union { int i; __half h; } tmp; tmp.h = var;
+                tmp.i = __shfl_up(tmp.i, lane_delta, width);
+                return tmp.h;
+            }
+            __device__
+            inline
+            __half2 __shfl_up(__half2 var, unsigned int lane_delta, int width = warpSize) {
+                union { int i; __half2 h; } tmp; tmp.h = var;
+                tmp.i = __shfl_up(tmp.i, lane_delta, width);
+                return tmp.h;
+            }
+            __device__
+            inline
+            __half __shfl_down(__half var, unsigned int lane_delta, int width = warpSize) {
+                union { int i; __half h; } tmp; tmp.h = var;
+                tmp.i = __shfl_down(tmp.i, lane_delta, width);
+                return tmp.h;
+            }
+            __device__
+            inline
+            __half2 __shfl_down(__half2 var, unsigned int lane_delta, int width = warpSize) {
+                union { int i; __half2 h; } tmp; tmp.h = var;
+                tmp.i = __shfl_down(tmp.i, lane_delta, width);
+                return tmp.h;
+            }
+            __device__
+            inline
+            __half __shfl_xor(__half var,  int lane_mask, int width = warpSize) {
+                union { int i; __half h; } tmp; tmp.h = var;
+                tmp.i = __shfl_xor(tmp.i, lane_mask, width);
+                return tmp.h;
+            }
+            __device__
+            inline
+            __half2 __shfl_xor(__half2 var,  int lane_mask, int width = warpSize) {
+                union { int i; __half2 h; } tmp; tmp.h = var;
+                tmp.i = __shfl_xor(tmp.i, lane_mask, width);
+                return tmp.h;
+            }
+        #endif // !defined(__HIPCC_RTC__)
     #endif // defined(__cplusplus)
 #elif defined(__GNUC__)
     #include "hip_fp16_gcc.h"

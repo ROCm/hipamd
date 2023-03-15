@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 - Present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,9 @@ THE SOFTWARE.
 #pragma once
 
 #ifdef __cplusplus
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
+
 /**
  * @brief Unsafe floating point rmw atomic add.
  *
@@ -175,7 +178,7 @@ __device__ inline float unsafeAtomicMin(float* addr, float val) {
  * @return Original value contained in \p addr.
  */
 __device__ inline double unsafeAtomicAdd(double* addr, double value) {
-#if (defined(__gfx90a__) || defined(__gfx940_)) &&                              \
+#if (defined(__gfx90a__) || defined(__gfx940__)) &&                              \
     __has_builtin(__builtin_amdgcn_flat_atomic_fadd_f64)
   return __builtin_amdgcn_flat_atomic_fadd_f64(addr, value);
 #elif defined (__hip_atomic_fetch_add)
@@ -307,7 +310,7 @@ __device__ inline double unsafeAtomicMin(double* addr, double val) {
  */
 __device__ inline float safeAtomicAdd(float* addr, float value) {
 #if defined(__gfx908__) ||                                                    \
-    (defined(__gfx90a) && !__has_builtin(__hip_atomic_fetch_add))
+    (defined(__gfx90a__) && !__has_builtin(__hip_atomic_fetch_add))
   // On gfx908, we can generate unsafe FP32 atomic add that does not follow all
   // IEEE rules when -munsafe-fp-atomics is passed. Do a CAS loop emulation instead.
   // On gfx90a, if we do not have the __hip_atomic_fetch_add builtin, we need to
@@ -563,4 +566,5 @@ __device__ inline double safeAtomicMin(double* addr, double val) {
   #endif
 }
 
+#pragma clang diagnostic pop
 #endif

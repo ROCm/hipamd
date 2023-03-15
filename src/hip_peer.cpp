@@ -220,7 +220,8 @@ hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevic
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  HIP_RETURN(hipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice));
+  HIP_RETURN(ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip::getNullStream(),
+                        true, false));
 }
 
 hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int srcDevice,
@@ -232,8 +233,14 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int src
       srcDevice < 0 || dstDevice < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-
-  HIP_RETURN(hipMemcpyAsync(dst, src, sizeBytes, hipMemcpyDeviceToDevice, stream));
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  HIP_RETURN(ihipMemcpy(dst, src, sizeBytes, hipMemcpyDeviceToDevice, *hip_stream, true, true));
 }
 
 hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags) {

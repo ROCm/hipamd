@@ -136,7 +136,7 @@ public:
   bool IsActiveMemory(amd::Memory* memory) const {
     return (allocations_.find(memory) != allocations_.end());
   }
-
+  const auto& Allocations() { return allocations_; }
 private:
   Heap() = delete;
   Heap(const Heap&) = delete;
@@ -213,6 +213,9 @@ public:
   /// Set memory pool access by different devices
   void GetAccess(hip::Device* device, hipMemAccessFlags* flags);
 
+  /// Frees all busy memory
+  void FreeAllMemory(hip::Stream* stream = nullptr);
+
   /// Accessors for the pool state
   bool EventDependencies() const { return (state_.event_dependencies_) ? true : false; }
   bool Opportunistic() const { return (state_.opportunistic_) ? true : false; }
@@ -222,7 +225,6 @@ private:
   MemoryPool() = delete;
   MemoryPool(const MemoryPool&) = delete;
   MemoryPool& operator=(const MemoryPool&) = delete;
-
 
   Heap busy_heap_;    //!< Heap of busy allocations
   Heap free_heap_;    //!< Heap of freed allocations

@@ -31,8 +31,6 @@ THE SOFTWARE.
 #include "platform/program.hpp"
 #include <elf/elf.hpp>
 
-hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                      amd::HostQueue& queue, bool isAsync = false);
 hipError_t ihipFree(void* ptr);
 // forward declaration of methods required for managed variables
 hipError_t ihipMallocManaged(void** ptr, size_t size, unsigned int align = 0);
@@ -172,6 +170,11 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       sramEccSupported = false;
       proc_name = "gfx90c";
       break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX940:
+      xnackSupported = true;
+      sramEccSupported = true;
+      proc_name = "gfx940";
+      break;
     case EF_AMDGPU_MACH_AMDGCN_GFX1010:
       xnackSupported = true;
       sramEccSupported = false;
@@ -186,6 +189,11 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       xnackSupported = true;
       sramEccSupported = false;
       proc_name = "gfx1012";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1013:
+      xnackSupported = true;
+      sramEccSupported = false;
+      proc_name = "gfx1013";
       break;
     case EF_AMDGPU_MACH_AMDGCN_GFX1030:
       xnackSupported = false;
@@ -206,6 +214,41 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       xnackSupported = false;
       sramEccSupported = false;
       proc_name = "gfx1033";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1034:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1034";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1035:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1035";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1036:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1036";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1100";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1101:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1101";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1102:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1102";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1103:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1103";
       break;
     default:
       return false;
@@ -590,10 +633,10 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   it->second->setManagedVarInfo(pointer, dvar->size());
 
   // copy initial value to the managed variable to the managed memory allocated
-  amd::HostQueue* queue = hip::getNullStream();
-  if (queue != nullptr) {
+  hip::Stream* stream = hip::getNullStream();
+  if (stream != nullptr) {
     status = ihipMemcpy(pointer, reinterpret_cast<address>(dvar->device_ptr()), dvar->size(),
-                        hipMemcpyDeviceToDevice, *queue);
+                        hipMemcpyDeviceToDevice, *stream);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
               managedVar.c_str());
@@ -613,7 +656,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   }
   // copy managed memory pointer to the managed device variable
   status = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), &pointer, dvar->size(),
-                      hipMemcpyHostToDevice, *queue);
+                      hipMemcpyHostToDevice, *stream);
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
             managedVar.c_str());
@@ -850,10 +893,10 @@ hipError_t StatCO::initStatManagedVarDevicePtr(int deviceId) {
       DeviceVar* dvar = nullptr;
       IHIP_RETURN_ONFAIL(var->getStatDeviceVar(&dvar, deviceId));
 
-      amd::HostQueue* queue = g_devices.at(deviceId)->NullStream();
-      if (queue != nullptr) {
+      hip::Stream* stream = g_devices.at(deviceId)->NullStream();
+      if (stream != nullptr) {
         err = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), var->getManagedVarPtr(),
-                         dvar->size(), hipMemcpyHostToDevice, *queue);
+                         dvar->size(), hipMemcpyHostToDevice, *stream);
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
         return hipErrorInvalidResourceHandle;

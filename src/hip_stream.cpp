@@ -31,7 +31,8 @@ namespace hip {
 // ================================================================================================
 Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
                const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
-    : queue_(nullptr),
+    : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled, 
+        convertToQueuePriority(p), cuMask),
       lock_("Stream Callback lock"),
       device_(dev),
       priority_(p),
@@ -40,22 +41,11 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
       cuMask_(cuMask),
       captureStatus_(captureStatus),
       originStream_(false),
-      captureID_(0) {}
-
-// ================================================================================================
-Stream::~Stream() {
-  if (queue_ != nullptr) {
-    amd::ScopedLock lock(streamSetLock);
-    streamSet.erase(this);
-
-    // Skip queue destruction for null stream in MT. Queue worker thread can be destroyed on
-    // the app exit, during the stream destruction, causing a race condition.
-    if (!null_ || AMD_DIRECT_DISPATCH) {
-      queue_->release();
-      queue_ = nullptr;
-    }
-  }
-}
+      captureID_(0)
+      {
+        amd::ScopedLock lock(streamSetLock);
+        streamSet.insert(this);
+      }
 
 // ================================================================================================
 hipError_t Stream::EndCapture() {
@@ -81,38 +71,16 @@ hipError_t Stream::EndCapture() {
 
 // ================================================================================================
 bool Stream::Create() {
-  amd::CommandQueue::Priority p;
-  switch (priority_) {
-    case Priority::High:
-      p = amd::CommandQueue::Priority::High;
-      break;
-    case Priority::Low:
-      p = amd::CommandQueue::Priority::Low;
-      break;
-    case Priority::Normal:
-    default:
-      p = amd::CommandQueue::Priority::Normal;
-      break;
-  }
-  amd::HostQueue* queue = new amd::HostQueue(*device_->asContext(), *device_->devices()[0],
-                                             0, amd::CommandQueue::RealTimeDisabled,
-                                             p, cuMask_);
+  return create();
+}
 
-  // Create a host queue
-  bool result = (queue != nullptr) ? queue->create() : false;
-  // Insert just created stream into the list of the blocking queues
-  if (result) {
+// ================================================================================================
+bool Stream::terminate() {
+  {
     amd::ScopedLock lock(streamSetLock);
-    streamSet.insert(this);
-    queue_ = queue;
-    device_->SaveQueue(queue);
-  } else if (queue != nullptr) {
-    // Queue creation has failed, and virtual device associated with the queue may not be created.
-    // Just need to delete the queue instance.
-    delete queue;
+    streamSet.erase(this);
   }
-
-  return result;
+  return HostQueue::terminate();
 }
 
 // ================================================================================================
@@ -132,29 +100,6 @@ bool isValid(hipStream_t& stream) {
     return false;
   }
   return true;
-}
-
-// ================================================================================================
-amd::HostQueue* Stream::asHostQueue(bool skip_alloc) {
-  if (queue_ != nullptr) {
-    return queue_;
-  }
-  // Access to the stream object is lock protected, because possible allocation
-  amd::ScopedLock l(Lock());
-  if (queue_ == nullptr) {
-    // Create the host queue for the first time
-    if (!skip_alloc) {
-      Create();
-    }
-  }
-  return queue_;
-}
-
-// ================================================================================================
-void Stream::Finish() const {
-  if (queue_ != nullptr) {
-    queue_->finish();
-  }
 }
 
 // ================================================================================================
@@ -180,7 +125,7 @@ void Stream::syncNonBlockingStreams(int deviceId) {
   for (auto& it : streamSet) {
     if (it->Flags() & hipStreamNonBlocking) {
       if (it->DeviceId() == deviceId) {
-        it->asHostQueue()->finish();
+        it->finish();
       }
     }
   }
@@ -207,7 +152,7 @@ void Stream::destroyAllStreams(int deviceId) {
     }
   }
   for (auto& it : toBeDeleted) {
-    delete it;
+    it->release();
   }
 }
 
@@ -215,36 +160,48 @@ bool Stream::StreamCaptureOngoing(void) {
   return (g_allCapturingStreams.empty() == true) ? false : true;
 }
 
+bool Stream::existsActiveStreamForDevice(hip::Device* device) {
+
+  amd::ScopedLock lock(streamSetLock);
+
+  for (const auto& active_stream : streamSet) {
+    if ((active_stream->GetDevice() == device) &&
+      active_stream->GetQueueStatus()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 };// hip namespace
 
 // ================================================================================================
-void iHipWaitActiveStreams(amd::HostQueue* blocking_queue, bool wait_null_stream) {
+void iHipWaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream) {
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = 0;
   {
     amd::ScopedLock lock(streamSetLock);
 
-    for (const auto& stream : streamSet) {
-      amd::HostQueue* active_queue = stream->asHostQueue();
+    for (const auto& active_stream : streamSet) {
       // If it's the current device
-      if ((&active_queue->device() == &blocking_queue->device()) &&
+      if ((&active_stream->device() == &blocking_stream->device()) &&
           // Make sure it's a default stream
-          ((stream->Flags() & hipStreamNonBlocking) == 0) &&
+          ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
           // and it's not the current stream
-          (active_queue != blocking_queue) &&
+          (active_stream != blocking_stream) &&
           // check for a wait on the null stream
-          (stream->Null() == wait_null_stream)) {
+          (active_stream->Null() == wait_null_stream)) {
         // Get the last valid command
-        amd::Command* command = active_queue->getLastQueuedCommand(true);
+        amd::Command* command = active_stream->getLastQueuedCommand(true);
         if (command != nullptr) {
           amd::Event& event = command->event();
           // Check HW status of the ROCcrl event.
           // Note: not all ROCclr modes support HW status
-          bool ready = active_queue->device().IsHwEventReady(event);
+          bool ready = active_stream->device().IsHwEventReady(event);
           if (!ready) {
             ready = (command->status() == CL_COMPLETE);
           }
-          submitMarker |= active_queue->vdev()->isFenceDirty();
+          submitMarker |= active_stream->vdev()->isFenceDirty();
           // Check the current active status
           if (!ready) {
             command->notifyCmdQueue();
@@ -263,10 +220,18 @@ void iHipWaitActiveStreams(amd::HostQueue* blocking_queue, bool wait_null_stream
 
   // Check if we have to wait anything
   if (eventWaitList.size() > 0 || submitMarker) {
-    amd::Command* command = new amd::Marker(*blocking_queue, kMarkerDisableFlush, eventWaitList);
+    amd::Command* command = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
     if (command != nullptr) {
       command->enqueue();
       command->release();
+    }
+
+    //Reset the dirty flag for all streams now that the marker is submitted
+    for (const auto& stream : streamSet) {
+      amd::HostQueue* active_queue = stream->asHostQueue();
+      if (active_queue->vdev()->isFenceDirty()) {
+        active_queue->vdev()->resetFenceDirty();
+      }
     }
   }
 
@@ -292,8 +257,11 @@ static hipError_t ihipStreamCreate(hipStream_t* stream,
   }
   hip::Stream* hStream = new hip::Stream(hip::getCurrentDevice(), priority, flags, false, cuMask);
 
-  if (hStream == nullptr || !hStream->Create()) {
-    delete hStream;
+  if (hStream == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  else if (!hStream->Create()) {
+    hStream->release();
     return hipErrorOutOfMemory;
   }
 
@@ -314,7 +282,7 @@ stream_per_thread::stream_per_thread() {
 stream_per_thread::~stream_per_thread() {
   for (auto &stream:m_streams) {
     if (stream != nullptr && hip::isValid(stream)) {
-      delete reinterpret_cast<hip::Stream*>(stream);
+      reinterpret_cast<hip::Stream*>(stream)->release();
       stream = nullptr;
     }
   }
@@ -453,7 +421,7 @@ hipError_t hipStreamSynchronize_common(hipStream_t stream) {
     }
   }
   // Wait for the current host queue
-  hip::getQueue(stream)->finish();
+  hip::getStream(stream)->finish();
   return hipSuccess;
 }
 
@@ -502,7 +470,7 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
   if (l_it != hip::tls.capture_streams_.end()) {
     hip::tls.capture_streams_.erase(l_it);
   }
-  delete s;
+  s->release();
 
   HIP_RETURN(hipSuccess);
 }
@@ -534,12 +502,6 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     return hipErrorContextIsDestroyed;
   }
 
-  if (stream != nullptr) {
-    // If still capturing return error
-    if (hip::Stream::StreamCaptureOngoing() == true) {
-      HIP_RETURN(hipErrorStreamCaptureIsolation);
-    }
-  }
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   return e->streamWait(stream, flags);
 }
@@ -568,9 +530,9 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
       HIP_RETURN(hipErrorStreamCaptureUnsupported);
     }
   }
-  amd::HostQueue* hostQueue = hip::getQueue(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
 
-  amd::Command* command = hostQueue->getLastQueuedCommand(true);
+  amd::Command* command = hip_stream->getLastQueuedCommand(true);
   if (command == nullptr) {
     // Nothing was submitted to the queue
     return hipSuccess;
@@ -608,13 +570,13 @@ hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* 
     return hipErrorContextIsDestroyed;
   }
 
-  amd::HostQueue* hostQueue = hip::getQueue(stream);
-  amd::Command* last_command = hostQueue->getLastQueuedCommand(true);
+  hip::Stream* hip_stream = hip::getStream(stream);
+  amd::Command* last_command = hip_stream->getLastQueuedCommand(true);
   amd::Command::EventWaitList eventWaitList;
   if (last_command != nullptr) {
     eventWaitList.push_back(last_command);
   }
-  amd::Command* command = new amd::Marker(*hostQueue, !kMarkerDisableFlush, eventWaitList);
+  amd::Command* command = new amd::Marker(*hip_stream, !kMarkerDisableFlush, eventWaitList);
   if (command == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -634,7 +596,7 @@ hipError_t streamCallback_common(hipStream_t stream, StreamCallback* cbo, void* 
   // Add the new barrier to stall the stream, until the callback is done
   eventWaitList.clear();
   eventWaitList.push_back(command);
-  amd::Command* block_command = new amd::Marker(*hostQueue, !kMarkerDisableFlush, eventWaitList);
+  amd::Command* block_command = new amd::Marker(*hip_stream, !kMarkerDisableFlush, eventWaitList);
   if (block_command == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -695,7 +657,7 @@ hipError_t hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userD
 // ================================================================================================
 hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void* userData) {
   HIP_INIT_API(hipLaunchHostFunc, stream, fn, userData);
-  if (stream == nullptr) {
+  if (stream == nullptr && (hip::Stream::StreamCaptureOngoing() == true)) {
     HIP_RETURN(hipErrorStreamCaptureImplicit);
   }
   HIP_RETURN(hipLaunchHostFunc_common(stream, fn, userData));
@@ -831,5 +793,29 @@ hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32
       std::copy(mask.begin(), mask.end(), cuMask);
     }
   }
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
+  HIP_INIT_API(hipStreamGetDevice, stream, device);
+
+  if (device == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (!hip::isValid(stream)) {
+    return HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+
+  if (stream == nullptr) {  // handle null stream
+    // null stream is associated with current device, return the device id associated with the
+    // current device
+    *device = hip::getCurrentDevice()->deviceId();
+  } else {
+    getStreamPerThread(stream);
+    *device = reinterpret_cast<hip::Stream*>(stream)->DeviceId();
+  }
+
   HIP_RETURN(hipSuccess);
 }
