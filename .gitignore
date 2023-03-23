@@ -11,6 +11,3 @@ bin/hipBusBandwidth
 bin/hipDispatchLatency
 bin/hipify-clang
 tags
-samples/1_Utils/hipInfo/hipInfo
-samples/1_Utils/hipBusBandwidth/hipBusBandwidth
-samples/1_Utils/hipDispatchLatency/hipDispatchLatency

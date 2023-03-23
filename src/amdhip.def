@@ -103,6 +103,9 @@ hipMemPoolImportPointer
 hipArrayCreate
 hipArray3DCreate
 hipArrayDestroy
+hipArrayGetInfo
+hipArrayGetDescriptor
+hipArray3DGetDescriptor
 hipMallocArray
 hipMemAdvise
 hipMemAllocPitch
@@ -190,6 +193,7 @@ hipStreamCreate
 hipStreamCreateWithFlags
 hipStreamCreateWithPriority
 hipStreamDestroy
+hipStreamGetDevice
 hipStreamGetFlags
 hipStreamQuery
 hipStreamSynchronize

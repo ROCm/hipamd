@@ -373,6 +373,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipHostRegisterPortable cudaHostRegisterPortable
 #define hipHostRegisterMapped cudaHostRegisterMapped
 #define hipHostRegisterIoMemory cudaHostRegisterIoMemory
+#define hipHostRegisterReadOnly cudaHostRegisterReadOnly
 
 #define HIP_LAUNCH_PARAM_BUFFER_POINTER CU_LAUNCH_PARAM_BUFFER_POINTER
 #define HIP_LAUNCH_PARAM_BUFFER_SIZE CU_LAUNCH_PARAM_BUFFER_SIZE
@@ -1382,6 +1383,10 @@ typedef enum cudaAccessProperty hipAccessProperty;
 typedef struct cudaAccessPolicyWindow hipAccessPolicyWindow;
 
 typedef enum  cudaGraphMemAttributeType hipGraphMemAttributeType;
+#define hipGraphMemAttrUsedMemCurrent cudaGraphMemAttrUsedMemCurrent
+#define hipGraphMemAttrUsedMemHigh cudaGraphMemAttrUsedMemHigh
+#define hipGraphMemAttrReservedMemCurrent cudaGraphMemAttrReservedMemCurrent
+#define hipGraphMemAttrReservedMemHigh cudaGraphMemAttrReservedMemHigh
 
 typedef enum cudaUserObjectFlags hipUserObjectFlags;
 #define hipUserObjectNoDestructorSync cudaUserObjectNoDestructorSync
@@ -2506,6 +2511,20 @@ inline static hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallb
         cudaStreamAddCallback(stream, (cudaStreamCallback_t)callback, userData, flags));
 }
 
+inline static hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
+    hipCtx_t context;
+    auto err = hipCUResultTohipError(cuStreamGetCtx(stream, &context));
+    if (err != hipSuccess) return err;
+
+    err = hipCUResultTohipError(cuCtxPushCurrent(context));
+    if (err != hipSuccess) return err;
+
+    err = hipCUResultTohipError(cuCtxGetDevice(device));
+    if (err != hipSuccess) return err;
+
+    return hipCUResultTohipError(cuCtxPopCurrent(&context));
+}
+
 inline static hipError_t hipDriverGetVersion(int* driverVersion) {
     return hipCUDAErrorTohipError(cudaDriverGetVersion(driverVersion));
 }
@@ -3184,6 +3203,21 @@ inline static hipError_t hipArrayDestroy(hiparray hArray){
 inline static hipError_t hipArray3DCreate(hiparray* pHandle,
                                           const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray){
     return hipCUResultTohipError(cuArray3DCreate(pHandle, pAllocateArray));
+}
+
+inline static hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
+                                          unsigned int* flags, hipArray* array) {
+    return hipCUDAErrorTohipError(cudaArrayGetInfo(desc, extent, flags, array));
+}
+
+inline static hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
+                                               hipArray* array) {
+    return hipCUResultTohipError(cuArrayGetDescriptor(pArrayDescriptor, (CUarray)array));
+}
+
+inline static hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor,
+                                                 hipArray* array) {
+    return hipCUResultTohipError(cuArray3DGetDescriptor(pArrayDescriptor, (CUarray)array));
 }
 
 inline static hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {

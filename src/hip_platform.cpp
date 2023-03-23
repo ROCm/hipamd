@@ -33,8 +33,6 @@ PlatformState* PlatformState::platform_;  // Initiaized as nullptr by default
 
 // forward declaration of methods required for __hipRegisrterManagedVar
 hipError_t ihipMallocManaged(void** ptr, size_t size, unsigned int align = 0);
-hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                      amd::HostQueue& queue, bool isAsync = false);
 
 struct __CudaFatBinaryWrapper {
   unsigned int magic;
@@ -146,9 +144,9 @@ extern "C" void __hipRegisterManagedVar(
   HIP_INIT_VOID();
   hipError_t status = ihipMallocManaged(pointer, size, align);
   if (status == hipSuccess) {
-    amd::HostQueue* queue = hip::getNullStream();
-    if (queue != nullptr) {
-      status = ihipMemcpy(*pointer, init_value, size, hipMemcpyHostToDevice, *queue);
+    hip::Stream* stream = hip::getNullStream();
+    if (stream != nullptr) {
+      status = ihipMemcpy(*pointer, init_value, size, hipMemcpyHostToDevice, *stream);
       guarantee((status == hipSuccess), "Error during memcpy to managed memory!");
     } else {
       ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
@@ -399,7 +397,7 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, cons
   hipFunction_t func = nullptr;
   hipError_t hip_error = PlatformState::instance().getStatFunc(&func, f, ihipGetDevice());
   if ((hip_error != hipSuccess) || (func == nullptr)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
   int max_blocks_per_grid = 0;
@@ -418,7 +416,7 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, cons
 hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, hipFunction_t f,
                                                    size_t dynSharedMemPerBlk, int blockSizeLimit) {
   HIP_INIT_API(hipModuleOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);
-  if ((gridSize == nullptr) || (blockSize == nullptr)) {
+  if ((gridSize == nullptr) || (blockSize == nullptr) || (f == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
@@ -442,7 +440,10 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* 
                                                             unsigned int flags) {
   HIP_INIT_API(hipModuleOccupancyMaxPotentialBlockSizeWithFlags, f, dynSharedMemPerBlk,
                blockSizeLimit, flags);
-  if ((gridSize == nullptr) || (blockSize == nullptr)) {
+  if ((gridSize == nullptr) || (blockSize == nullptr) || (f == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
@@ -464,7 +465,7 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hi
                                                               size_t dynSharedMemPerBlk) {
   HIP_INIT_API(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor, f, blockSize,
                dynSharedMemPerBlk);
-  if (numBlocks == nullptr) {
+  if (numBlocks == nullptr || (f == nullptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
@@ -483,7 +484,10 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
     int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags) {
   HIP_INIT_API(hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags, f, blockSize,
                dynSharedMemPerBlk, flags);
-  if (numBlocks == nullptr) {
+  if (numBlocks == nullptr || (f == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (flags != hipOccupancyDefault && flags != hipOccupancyDisableCachingOverride) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
@@ -508,7 +512,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const vo
   hipFunction_t func = nullptr;
   hipError_t hip_error = PlatformState::instance().getStatFunc(&func, f, ihipGetDevice());
   if ((hip_error != hipSuccess) || (func == nullptr)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
@@ -538,7 +542,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int* numBlocks,
   hipFunction_t func = nullptr;
   hipError_t hip_error = PlatformState::instance().getStatFunc(&func, f, ihipGetDevice());
   if ((hip_error != hipSuccess) || (func == nullptr)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[0];
@@ -662,7 +666,10 @@ void PlatformState::init() {
   initialized_ = true;
   for (auto& it : statCO_.modules_) {
     hipError_t err = digestFatBinary(it.first, it.second);
-    assert(err == hipSuccess);
+    if (err != hipSuccess) {
+      HIP_ERROR_PRINT(err);
+      return;
+    }
   }
   for (auto& it : statCO_.vars_) {
     it.second->resize_dVar(g_devices.size());
@@ -673,8 +680,6 @@ void PlatformState::init() {
 }
 
 hipError_t PlatformState::loadModule(hipModule_t* module, const char* fname, const void* image) {
-  amd::ScopedLock lock(lock_);
-
   if (module == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -689,6 +694,7 @@ hipError_t PlatformState::loadModule(hipModule_t* module, const char* fname, con
   *module = dynCo->module();
   assert(*module != nullptr);
 
+  amd::ScopedLock lock(lock_);
   if (dynCO_map_.find(*module) != dynCO_map_.end()) {
     delete dynCo;
     return hipErrorAlreadyMapped;

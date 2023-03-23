@@ -30,21 +30,21 @@ namespace hip {
 static amd::Monitor eventSetLock{"Guards global event set"};
 static std::unordered_set<hipEvent_t> eventSet;
 
-bool Event::ready() {
+bool Event::ready(eventType type) {
   if (event_->status() != CL_COMPLETE) {
     event_->notifyCmdQueue();
   }
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
-  bool ready = g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_);
+  bool ready = CheckHwEvent(type);
   if (!ready) {
     ready = (event_->status() == CL_COMPLETE);
   }
   return ready;
 }
 
-bool EventDD::ready() {
+bool EventDD::ready(eventType type) {
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
-  bool ready = g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_);
+  bool ready = CheckHwEvent(type);
   // FIXME: Remove status check entirely
   if (!ready) {
     ready = (event_->status() == CL_COMPLETE);
@@ -60,7 +60,7 @@ hipError_t Event::query() {
     return hipSuccess;
   }
 
-  return ready() ? hipSuccess : hipErrorNotReady;
+  return ready(Query) ? hipSuccess : hipErrorNotReady;
 }
 
 hipError_t Event::synchronize() {
@@ -108,7 +108,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
       return hipErrorInvalidHandle;
     }
 
-    if (!ready()) {
+    if (!ready(ElapsedTime)) {
       return hipErrorNotReady;
     }
 
@@ -124,7 +124,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     return hipErrorInvalidHandle;
   }
 
-  if (!ready() || !eStop.ready()) {
+  if (!ready(ElapsedTime) || !eStop.ready(ElapsedTime)) {
     return hipErrorNotReady;
   }
 
@@ -177,12 +177,12 @@ int64_t EventDD::time(bool getStartTs) const {
   }
 }
 
-hipError_t Event::streamWaitCommand(amd::Command*& command, amd::HostQueue* queue) {
+hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream) {
   amd::Command::EventWaitList eventWaitList;
   if (event_ != nullptr) {
     eventWaitList.push_back(event_);
   }
-  command = new amd::Marker(*queue, kMarkerDisableFlush, eventWaitList);
+  command = new amd::Marker(*stream, kMarkerDisableFlush, eventWaitList);
 
   if (command == NULL) {
     return hipErrorOutOfMemory;
@@ -196,17 +196,17 @@ hipError_t Event::enqueueStreamWaitCommand(hipStream_t stream, amd::Command* com
 }
 
 hipError_t Event::streamWait(hipStream_t stream, uint flags) {
-  amd::HostQueue* queue = hip::getQueue(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
   // Access to event_ object must be lock protected
   amd::ScopedLock lock(lock_);
-  if ((event_ == nullptr) || (event_->command().queue() == queue) || ready()) {
+  if ((event_ == nullptr) || (event_->command().queue() == hip_stream) || ready(StreamWait)) {
     return hipSuccess;
   }
   if (!event_->notifyCmdQueue()) {
     return hipErrorLaunchOutOfResources;
   }
   amd::Command* command;
-  hipError_t status = streamWaitCommand(command, queue);
+  hipError_t status = streamWaitCommand(command, hip_stream);
   if (status != hipSuccess) {
     return status;
   }
@@ -218,20 +218,19 @@ hipError_t Event::streamWait(hipStream_t stream, uint flags) {
   return hipSuccess;
 }
 
-hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* queue,
+hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                 uint32_t ext_flags ) {
   if (command == nullptr) {
     int32_t releaseFlags = ((ext_flags == 0) ? flags : ext_flags) &
-                            (hipEventReleaseToSystem | hipEventReleaseToDevice);
-    if (releaseFlags & hipEventReleaseToDevice) {
-      releaseFlags = amd::Device::kCacheStateAgent;
-    } else if (releaseFlags & hipEventReleaseToSystem) {
-      releaseFlags = amd::Device::kCacheStateSystem;
-    } else {
+                            (hipEventReleaseToDevice | hipEventReleaseToSystem |
+                             hipEventDisableSystemFence);
+    if (releaseFlags & hipEventDisableSystemFence) {
       releaseFlags = amd::Device::kCacheStateIgnore;
+    } else {
+      releaseFlags = amd::Device::kCacheStateInvalid;
     }
     // Always submit a EventMarker.
-    command = new hip::EventMarker(*queue, !kMarkerDisableFlush, true, releaseFlags);
+    command = new hip::EventMarker(*stream, !kMarkerDisableFlush, true, releaseFlags);
   }
   return hipSuccess;
 }
@@ -249,10 +248,10 @@ hipError_t Event::enqueueRecordCommand(hipStream_t stream, amd::Command* command
 }
 
 hipError_t Event::addMarker(hipStream_t stream, amd::Command* command, bool record) {
-  amd::HostQueue* queue = hip::getQueue(stream);
+  hip::Stream* hip_stream = hip::getStream(stream);
   // Keep the lock always at the beginning of this to avoid a race. SWDEV-277847
   amd::ScopedLock lock(lock_);
-  hipError_t status = recordCommand(command, queue);
+  hipError_t status = recordCommand(command, hip_stream);
   if (status != hipSuccess) {
     return hipSuccess;
   }
@@ -279,14 +278,21 @@ bool isValid(hipEvent_t event) {
 // ================================================================================================
 hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   unsigned supportedFlags = hipEventDefault | hipEventBlockingSync | hipEventDisableTiming |
-      hipEventReleaseToDevice | hipEventReleaseToSystem | hipEventInterprocess;
+                            hipEventReleaseToDevice | hipEventReleaseToSystem |
+                            hipEventInterprocess | hipEventDisableSystemFence;
 
-  const unsigned releaseFlags = (hipEventReleaseToDevice | hipEventReleaseToSystem);
+  const unsigned releaseFlags = (hipEventReleaseToDevice | hipEventReleaseToSystem |
+                                 hipEventDisableSystemFence);
   // can't set any unsupported flags.
-  // can't set both release flags
+  // can set only one of the release flags.
   // if hipEventInterprocess flag is set, then hipEventDisableTiming flag also must be set
   const bool illegalFlags = (flags & ~supportedFlags) ||
-                            ((flags & releaseFlags) == releaseFlags) ||
+                            ([](unsigned int num){
+                              unsigned int bitcount;
+                              for (bitcount = 0; num; bitcount++) {
+                                num &= num - 1;
+                              }
+                              return bitcount; } (flags & releaseFlags) > 1) ||
                             ((flags & hipEventInterprocess) && !(flags & hipEventDisableTiming));
   if (!illegalFlags) {
     hip::Event* e = nullptr;
@@ -379,8 +385,8 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream) {
     return hipErrorInvalidHandle;
   }
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
-  amd::HostQueue* queue = hip::getQueue(stream);
-  if (g_devices[e->deviceId()]->devices()[0] != &queue->device()) {
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (g_devices[e->deviceId()]->devices()[0] != &hip_stream->device()) {
     return hipErrorInvalidHandle;
   }
   return e->addMarker(stream, nullptr, true);
@@ -404,9 +410,6 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
-  if (hip::Stream::StreamCaptureOngoing() == true) {
-    HIP_RETURN(hipErrorStreamCaptureUnsupported);
-  }
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   HIP_RETURN(e->synchronize());
 }

@@ -29,7 +29,7 @@
 
 std::vector<hip::Stream*> g_captureStreams;
 amd::Monitor g_captureStreamsLock{"StreamCaptureGlobalList"};
-static amd::Monitor g_streamSetLock{"StreamCaptureset"};
+amd::Monitor g_streamSetLock{"StreamCaptureset"};
 std::unordered_set<hip::Stream*> g_allCapturingStreams;
 
 inline hipError_t ihipGraphAddNode(hipGraphNode_t graphNode, hipGraph_t graph,
@@ -1218,12 +1218,20 @@ hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t grap
 hipError_t ihipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                uint64_t flags = 0) {
   if (pGraphExec == nullptr || graph == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
+  }
+  if (graph->IsGraphInstantiated() == true) {
+    for (auto node : graph->GetNodes()) {
+      if ((node->GetType() == hipGraphNodeTypeMemAlloc)
+          || (node->GetType() == hipGraphNodeTypeMemFree)) {
+        return hipErrorNotSupported;
+      }
+    }
   }
   std::unordered_map<Node, Node> clonedNodes;
   hipGraph_t clonedGraph = graph->clone(clonedNodes);
   if (clonedGraph == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   std::vector<std::vector<Node>> parallelLists;
   std::unordered_map<Node, std::vector<Node>> nodeWaitLists;
@@ -1236,6 +1244,7 @@ hipError_t ihipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
       new hipGraphExec(levelOrder, parallelLists, nodeWaitLists, clonedNodes,
       graphExeUserObj, flags);
   if (*pGraphExec != nullptr) {
+    graph->SetGraphInstantiated(true);
     return (*pGraphExec)->Init();
   } else {
     return hipErrorOutOfMemory;
@@ -1260,11 +1269,7 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // enable when change is merged to hip
-  // if (flags == hipGraphInstantiateFlagAutoFreeOnLaunch) {
-  // Free any unfreed memory allocations before the graph is relaunched
-  //}
-  HIP_RETURN_DURATION(ihipGraphInstantiate(pGraphExec, graph));
+  HIP_RETURN_DURATION(ihipGraphInstantiate(pGraphExec, graph, flags));
 }
 
 hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
@@ -1474,7 +1479,7 @@ hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
   if (clonedNode == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  HIP_RETURN(reinterpret_cast<hipGraphMemsetNode*>(clonedNode)->SetParams(pNodeParams));
+  HIP_RETURN(reinterpret_cast<hipGraphMemsetNode*>(clonedNode)->SetParams(pNodeParams, true));
 }
 
 hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
@@ -1824,6 +1829,16 @@ hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
   if (!hipGraphNode::isNodeValid(node)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  // First remove all the edges both incoming and outgoing from node.
+  for(auto& edge : node->GetEdges()) {
+    node->RemoveUpdateEdge(edge);
+  }
+  const std::vector<Node>& dependencies = node->GetDependencies();
+  for(auto& parent: dependencies) {
+    parent->RemoveEdge(node);
+    parent->SetOutDegree(parent->GetOutDegree() - 1);
+  }
+  // Remove the node from graph.
   node->GetParentGraph()->RemoveNode(node);
   HIP_RETURN(hipSuccess);
 }
@@ -2166,6 +2181,16 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       (numDependencies > 0 && pDependencies == nullptr) || pNodeParams == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  if (pNodeParams->bytesize == 0 || pNodeParams->poolProps.allocType != hipMemAllocationTypePinned
+      || pNodeParams->poolProps.location.type != hipMemLocationTypeDevice) {
+    pNodeParams->dptr = nullptr;
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (pNodeParams->poolProps.location.type == hipMemLocationTypeDevice) {
+    if (pNodeParams->poolProps.location.id < 0 || pNodeParams->poolProps.location.id >= g_devices.size()) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
   // Clear the pointer to allocated memory because it may contain stale/uninitialized data
   pNodeParams->dptr = nullptr;
   auto mem_alloc_node = new hipGraphMemAllocNode(pNodeParams);
@@ -2179,7 +2204,8 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 // ================================================================================================
 hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams) {
   HIP_INIT_API(hipGraphMemAllocNodeGetParams, node, pNodeParams);
-  if (node == nullptr || pNodeParams == nullptr || !hipGraphNode::isNodeValid(node)) {
+  if (node == nullptr || pNodeParams == nullptr || !hipGraphNode::isNodeValid(node)
+      || node->GetType() != hipGraphNodeTypeMemAlloc) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   reinterpret_cast<hipGraphMemAllocNode*>(node)->GetParams(pNodeParams);
@@ -2188,12 +2214,23 @@ hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodePar
 
 // ================================================================================================
 hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
-    const hipGraphNode_t* pDependencies, size_t numDependencies, void* dev_ptr) {
+                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
+                                  void* dev_ptr) {
   HIP_INIT_API(hipGraphAddMemFreeNode, pGraphNode, graph, pDependencies, numDependencies, dev_ptr);
   if (pGraphNode == nullptr || graph == nullptr ||
-      (numDependencies > 0 && pDependencies == nullptr) || dev_ptr == nullptr) {
+      ((numDependencies > 0 && pDependencies == nullptr) ||
+       (pDependencies != nullptr && numDependencies == 0)) ||
+      dev_ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  // Is memory passed to be free'd valid
+  size_t offset = 0;
+  amd::Memory* memory_object = getMemoryObject(dev_ptr, offset);
+  if (memory_object == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   auto mem_free_node = new hipGraphMemFreeNode(dev_ptr);
   *pGraphNode = mem_free_node;
   auto status = ihipGraphAddNode(*pGraphNode, graph, pDependencies, numDependencies);
@@ -2203,7 +2240,8 @@ hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 // ================================================================================================
 hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void* dev_ptr) {
   HIP_INIT_API(hipGraphMemFreeNodeGetParams, node, dev_ptr);
-  if (node == nullptr || dev_ptr == nullptr || !hipGraphNode::isNodeValid(node)) {
+  if (node == nullptr || dev_ptr == nullptr || !hipGraphNode::isNodeValid(node)
+      || node->GetType() != hipGraphNodeTypeMemFree) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   reinterpret_cast<hipGraphMemFreeNode*>(node)->GetParams(reinterpret_cast<void**>(dev_ptr));
@@ -2213,57 +2251,72 @@ hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void* dev_ptr) {
 // ================================================================================================
 hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {
   HIP_INIT_API(hipDeviceGetGraphMemAttribute, device, attr, value);
-  if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0 || value == nullptr) {
+  if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  // later use this to access memory pool
-  auto* deviceHandle = g_devices[device]->devices()[0];
+  if (value == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipError_t result = hipErrorInvalidValue;
   switch (attr) {
     case hipGraphMemAttrUsedMemCurrent:
-      *reinterpret_cast<int32_t*>(value) = 0;
+      result = g_devices[device]->GetGraphMemoryPool()->GetAttribute(
+          hipMemPoolAttrUsedMemCurrent, value);
       break;
     case hipGraphMemAttrUsedMemHigh:
-      *reinterpret_cast<int32_t*>(value) = 0;
+      result = g_devices[device]->GetGraphMemoryPool()->GetAttribute(
+          hipMemPoolAttrUsedMemHigh, value);
       break;
     case hipGraphMemAttrReservedMemCurrent:
-      *reinterpret_cast<int32_t*>(value) = 0;
+      result = g_devices[device]->GetGraphMemoryPool()->GetAttribute(
+          hipMemPoolAttrReservedMemCurrent, value);
       break;
     case hipGraphMemAttrReservedMemHigh:
-      *reinterpret_cast<int32_t*>(value) = 0;
+      result = g_devices[device]->GetGraphMemoryPool()->GetAttribute(
+          hipMemPoolAttrReservedMemHigh, value);
       break;
     default:
-      return HIP_RETURN(hipErrorInvalidValue);
+      break;
   }
-  return HIP_RETURN(hipSuccess);
+  HIP_RETURN(result);
 }
 
+// ================================================================================================
 hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {
   HIP_INIT_API(hipDeviceSetGraphMemAttribute, device, attr, value);
-  if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0 || value == nullptr) {
+  if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  // later use this to access memory pool
-  auto* deviceHandle = g_devices[device]->devices()[0];
+  if (value == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  hipError_t result = hipErrorInvalidValue;
   switch (attr) {
     case hipGraphMemAttrUsedMemHigh:
+      result = g_devices[device]->GetGraphMemoryPool()->SetAttribute(
+          hipMemPoolAttrUsedMemHigh, value);
       break;
     case hipGraphMemAttrReservedMemHigh:
+      result = g_devices[device]->GetGraphMemoryPool()->SetAttribute(
+          hipMemPoolAttrReservedMemHigh, value);
       break;
     default:
-      return HIP_RETURN(hipErrorInvalidValue);
+      break;
   }
-  return HIP_RETURN(hipSuccess);
+  HIP_RETURN(result);
 }
 
+// ================================================================================================
 hipError_t hipDeviceGraphMemTrim(int device) {
   HIP_INIT_API(hipDeviceGraphMemTrim, device);
   if ((static_cast<size_t>(device) >= g_devices.size()) || device < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  // not implemented yet
-  return HIP_RETURN(hipSuccess);
+  g_devices[device]->GetGraphMemoryPool()->TrimTo(0);
+  HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy,
                                unsigned int initialRefcount, unsigned int flags) {
   HIP_INIT_API(hipUserObjectCreate, object_out, ptr, destroy, initialRefcount, flags);
@@ -2287,6 +2340,10 @@ hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count) {
   }
   if (object->referenceCount() < count || !hipUserObject::isUserObjvalid(object)) {
     HIP_RETURN(hipSuccess);
+  }
+  //! If all the counts are gone not longer need the obj in the list
+  if (object->referenceCount() == count) {
+    hipUserObject::removeUSerObj(object);
   }
   object->decreaseRefCount(count);
   HIP_RETURN(hipSuccess);
@@ -2389,7 +2446,7 @@ hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
   }
   if (!(hNode->GetType() == hipGraphNodeTypeKernel || hNode->GetType() == hipGraphNodeTypeMemcpy ||
         hNode->GetType() == hipGraphNodeTypeMemset)) {
-    return HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidValue);
   }
   clonedNode->SetEnabled(isEnabled);
   HIP_RETURN(hipSuccess);
@@ -2408,7 +2465,7 @@ hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
   }
   if (!(hNode->GetType() == hipGraphNodeTypeKernel || hNode->GetType() == hipGraphNodeTypeMemcpy ||
         hNode->GetType() == hipGraphNodeTypeMemset)) {
-    return HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidValue);
   }
   *isEnabled = clonedNode->GetEnabled();
   HIP_RETURN(hipSuccess);

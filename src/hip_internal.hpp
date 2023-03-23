@@ -166,7 +166,6 @@ static  amd::Monitor g_hipInitlock{"hipInit lock"};
     if (hip::tls.capture_streams_.size() != 0) {                                                   \
       HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
     }                                                                                              \
-    amd::ScopedLock lock(g_captureStreamsLock);                                                    \
     if (g_captureStreams.size() != 0) {                                                            \
       HIP_RETURN(hipErrorStreamCaptureUnsupported);                                                \
     }                                                                                              \
@@ -225,12 +224,11 @@ public:
 namespace hip {
   class Device;
   class MemoryPool;
-  class Stream {
+  class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
 
   private:
-    amd::HostQueue* queue_;
     mutable amd::Monitor lock_;
     Device* device_;
     Priority priority_;
@@ -260,18 +258,20 @@ namespace hip {
     /// Capture events
     std::unordered_set<hipEvent_t> captureEvents_;
     unsigned long long captureID_;
+
+    static inline CommandQueue::Priority convertToQueuePriority(Priority p){
+      return p == Priority::High ? amd::CommandQueue::Priority::High : p == Priority::Low ?
+                    amd::CommandQueue::Priority::Low : amd::CommandQueue::Priority::Normal;
+    }
+
   public:
     Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
            const std::vector<uint32_t>& cuMask = {},
            hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone);
-    ~Stream();
+
     /// Creates the hip stream object, including AMD host queue
     bool Create();
-
-    /// Get device AMD host queue object. The method can allocate the queue
-    amd::HostQueue* asHostQueue(bool skip_alloc = false);
-
-    void Finish() const;
+    virtual bool terminate() override;
     /// Get device ID associated with the current stream;
     int DeviceId() const;
     /// Get HIP device associated with the stream
@@ -299,7 +299,7 @@ namespace hip {
     static void destroyAllStreams(int deviceId);
 
     /// Check Stream Capture status to make sure it is done
-    static bool StreamCaptureOngoing(void);
+    static bool StreamCaptureOngoing(hipStream_t hStream);
 
     /// Returns capture status of the current stream
     hipStreamCaptureStatus GetCaptureStatus() const { return captureStatus_; }
@@ -378,6 +378,11 @@ namespace hip {
         parallelCaptureStreams_.erase(it);
       }
     }
+    static bool existsActiveStreamForDevice(hip::Device* device);
+
+    /// The stream should be destroyed via release() rather than delete
+    private:
+      ~Stream() {};
   };
 
   /// HIP Device class
@@ -389,7 +394,7 @@ namespace hip {
     /// Store it here so we don't have to loop through the device list every time
     int deviceId_;
     /// ROCclr host queue for default streams
-    Stream null_stream_;
+    Stream* null_stream_  = nullptr;
     /// Store device flags
     unsigned int flags_;
     /// Maintain list of user enabled peers
@@ -398,21 +403,21 @@ namespace hip {
     /// True if this device is active
     bool isActive_;
 
-    std::vector<amd::HostQueue*> queues_;
 
-    MemoryPool* default_mem_pool_;
+    MemoryPool* default_mem_pool_;  //!< Default memory pool for this device
     MemoryPool* current_mem_pool_;
+    MemoryPool* graph_mem_pool_;    //!< Memory pool, associated with graphs for this device
 
     std::set<MemoryPool*> mem_pools_;
 
   public:
     Device(amd::Context* ctx, int devId): context_(ctx),
         deviceId_(devId),
-        null_stream_(this, Stream::Priority::Normal, 0, true),
          flags_(hipDeviceScheduleSpin),
         isActive_(false),
         default_mem_pool_(nullptr),
-        current_mem_pool_(nullptr)
+        current_mem_pool_(nullptr),
+        graph_mem_pool_(nullptr)
         { assert(ctx != nullptr); }
     ~Device();
 
@@ -445,22 +450,16 @@ namespace hip {
     void setFlags(unsigned int flags) { flags_ = flags; }
     void Reset();
 
-    amd::HostQueue* NullStream(bool skip_alloc = false);
-    Stream* GetNullStream();
+   hip::Stream* NullStream(bool skip_alloc = false);
+   Stream* GetNullStream();
 
-    void SaveQueue(amd::HostQueue* queue) {
-      amd::ScopedLock lock(lock_);
-      queues_.push_back(queue);
-    }
 
     bool GetActiveStatus() {
       amd::ScopedLock lock(lock_);
       if (isActive_) return true;
-      for (int i = 0; i < queues_.size(); i++) {
-        if (queues_[i]->GetQueueStatus()) {
-          isActive_ = true;
-          return true;
-        }
+      if (Stream::existsActiveStreamForDevice(this)) {
+        isActive_ = true;
+        return true;
       }
       return false;
     }
@@ -476,6 +475,9 @@ namespace hip {
     /// Get the default memory pool on the device
     MemoryPool* GetDefaultMemoryPool() const { return default_mem_pool_; }
 
+    /// Get the graph memory pool on the device
+    MemoryPool* GetGraphMemoryPool() const { return graph_mem_pool_; }
+
     /// Add memory pool to the device
     void AddMemoryPool(MemoryPool* pool);
 
@@ -490,6 +492,7 @@ namespace hip {
 
     /// Removes a destroyed stream from the safe list of memory pools
     void RemoveStreamFromPools(Stream* stream);
+
   };
 
   /// Thread Local Storage Variables Aggregator Class
@@ -513,7 +516,7 @@ namespace hip {
   extern thread_local TlsAggregator tls;
 
   /// Device representing the host - for pinned memory
-  extern Device* host_device;
+  extern amd::Context* host_context;
 
   extern bool init();
 
@@ -524,11 +527,11 @@ namespace hip {
   /// Get ROCclr queue associated with hipStream
   /// Note: This follows the CUDA spec to sync with default streams
   ///       and Blocking streams
-  extern amd::HostQueue* getQueue(hipStream_t stream);
+  extern hip::Stream* getStream(hipStream_t stream);
   /// Get default stream associated with the ROCclr context
-  extern amd::HostQueue* getNullStream(amd::Context&);
+  extern hip::Stream* getNullStream(amd::Context&);
   /// Get default stream of the thread
-  extern amd::HostQueue* getNullStream();
+  extern hip::Stream* getNullStream();
   /// Get device ID associated with the ROCclr context
   int getDeviceID(amd::Context& ctx);
   /// Check if stream is valid
@@ -542,7 +545,7 @@ extern void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void*
 
 /// Wait all active streams on the blocking queue. The method enqueues a wait command and
 /// doesn't stall the current thread
-extern void iHipWaitActiveStreams(amd::HostQueue* blocking_queue, bool wait_null_stream = false);
+extern void iHipWaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
 
 extern std::vector<hip::Device*> g_devices;
 extern hipError_t ihipDeviceGetCount(int* count);
@@ -561,7 +564,8 @@ extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t de
 extern hipError_t ihipDeviceGet(hipDevice_t* device, int deviceId);
 extern hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void* ptr,
                                       uint64_t value, uint64_t mask, unsigned int flags, size_t sizeBytes);
-
+hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
+                      hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true);
 constexpr bool kOptionChangeable = true;
 constexpr bool kNewDevProg = false;
 
@@ -569,5 +573,6 @@ constexpr bool kMarkerDisableFlush = true;   //!< Avoids command batch flush in 
 
 extern std::vector<hip::Stream*> g_captureStreams;
 extern amd::Monitor g_captureStreamsLock;
+extern amd::Monitor g_streamSetLock;
 extern std::unordered_set<hip::Stream*> g_allCapturingStreams;
 #endif // HIP_SRC_HIP_INTERNAL_H

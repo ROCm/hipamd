@@ -512,17 +512,17 @@ hipError_t hipDeviceSetSharedMemConfig ( hipSharedMemConfig config ) {
 hipError_t hipDeviceSynchronize ( void ) {
   HIP_INIT_API(hipDeviceSynchronize);
 
-  amd::HostQueue* queue = hip::getNullStream();
+  hip::Stream* stream = hip::getNullStream();
 
-  if (!queue) {
+  if (!stream) {
     HIP_RETURN(hipErrorOutOfMemory);
   }
 
-  if (hip::Stream::StreamCaptureOngoing() == true) {
+  if (hip::Stream::StreamCaptureOngoing(reinterpret_cast<hipStream_t>(stream)) == true) {
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
 
-  queue->finish();
+  stream->finish();
 
   hip::Stream::syncNonBlockingStreams(hip::getCurrentDevice()->deviceId());
 
@@ -602,7 +602,7 @@ hipError_t hipSetDeviceFlags ( unsigned int  flags ) {
   switch (scheduleFlag) {
     case hipDeviceScheduleAuto:
       // Current behavior is different from the spec, due to MT usage in runtime
-      if (hip::host_device->devices().size() >= std::thread::hardware_concurrency()) {
+      if (hip::host_context->devices().size() >= std::thread::hardware_concurrency()) {
         device->SetActiveWait(false);
         break;
       }

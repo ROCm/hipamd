@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #include "hiprtcComgrHelper.hpp"
 #if defined(_WIN32)
-  #include <io.h>
+#include <io.h>
 #endif
 
 #include "../amd_hsa_elf.hpp"
@@ -41,8 +41,8 @@ constexpr char const* OFFLOAD_KIND_HIPV4 = "hipv4";
 constexpr char const* OFFLOAD_KIND_HCC = "hcc";
 constexpr char const* AMDGCN_TARGET_TRIPLE = "amdgcn-amd-amdhsa-";
 
-static constexpr size_t bundle_magic_string_size
-                                     = strLiteralLength(CLANG_OFFLOAD_BUNDLER_MAGIC_STR);
+static constexpr size_t bundle_magic_string_size =
+    strLiteralLength(CLANG_OFFLOAD_BUNDLER_MAGIC_STR);
 
 struct __ClangOffloadBundleInfo {
   uint64_t offset;
@@ -157,6 +157,11 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       sramEccSupported = false;
       proc_name = "gfx90c";
       break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX940:
+      xnackSupported = true;
+      sramEccSupported = true;
+      proc_name = "gfx940";
+      break;
     case EF_AMDGPU_MACH_AMDGCN_GFX1010:
       xnackSupported = true;
       sramEccSupported = false;
@@ -171,6 +176,11 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       xnackSupported = true;
       sramEccSupported = false;
       proc_name = "gfx1012";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1013:
+      xnackSupported = true;
+      sramEccSupported = false;
+      proc_name = "gfx1013";
       break;
     case EF_AMDGPU_MACH_AMDGCN_GFX1030:
       xnackSupported = false;
@@ -192,14 +202,48 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       sramEccSupported = false;
       proc_name = "gfx1033";
       break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1034:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1034";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1035:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1035";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1036:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1036";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1100";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1101:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1101";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1102:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1102";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1103:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1103";
+      break;
     default:
       return false;
   }
   return true;
 }
 
-static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string& target_id,
-                                            unsigned& co_version) {
+static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string& target_id) {
   if (!code_object) return false;
   const Elf64_Ehdr* ehdr = reinterpret_cast<const Elf64_Ehdr*>(code_object);
   if (ehdr->e_machine != EM_AMDGPU) return false;
@@ -213,12 +257,12 @@ static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string
 
   switch (ehdr->e_ident[EI_ABIVERSION]) {
     case ELFABIVERSION_AMDGPU_HSA_V2: {
-      co_version = 2;
+      LogPrintfInfo("[Code Object V2, target id:%s]", target_id.c_str());
       return false;
     }
 
     case ELFABIVERSION_AMDGPU_HSA_V3: {
-      co_version = 3;
+      LogPrintfInfo("[Code Object V3, target id:%s]", target_id.c_str());
       if (isSramEccSupported) {
         if (ehdr->e_flags & EF_AMDGPU_FEATURE_SRAMECC_V3)
           target_id += ":sramecc+";
@@ -234,8 +278,13 @@ static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string
       break;
     }
 
-    case ELFABIVERSION_AMDGPU_HSA_V4: {
-      co_version = 4;
+    case ELFABIVERSION_AMDGPU_HSA_V4:
+    case ELFABIVERSION_AMDGPU_HSA_V5: {
+      if (ehdr->e_ident[EI_ABIVERSION] & ELFABIVERSION_AMDGPU_HSA_V4) {
+        LogPrintfInfo("[Code Object V4, target id:%s]", target_id.c_str());
+      } else {
+        LogPrintfInfo("[Code Object V5, target id:%s]", target_id.c_str());
+      }
       unsigned co_sram_value = (ehdr->e_flags) & EF_AMDGPU_FEATURE_SRAMECC_V4;
       if (co_sram_value == EF_AMDGPU_FEATURE_SRAMECC_OFF_V4)
         target_id += ":sramecc-";
@@ -303,18 +352,17 @@ static bool getTargetIDValue(std::string& input, std::string& processor, char& s
 }
 
 static bool getTripleTargetID(std::string bundled_co_entry_id, const void* code_object,
-                              std::string& co_triple_target_id, unsigned& co_version) {
+                              std::string& co_triple_target_id) {
   std::string offload_kind = trimName(bundled_co_entry_id, '-');
   if (offload_kind != OFFLOAD_KIND_HIPV4 && offload_kind != OFFLOAD_KIND_HIP &&
       offload_kind != OFFLOAD_KIND_HCC)
     return false;
 
   if (offload_kind != OFFLOAD_KIND_HIPV4)
-    return getTripleTargetIDFromCodeObject(code_object, co_triple_target_id, co_version);
+    return getTripleTargetIDFromCodeObject(code_object, co_triple_target_id);
 
   // For code object V4 onwards the bundled code object entry ID correctly
-  // specifies the target tripple.
-  co_version = 4;
+  // specifies the target triple.
   co_triple_target_id = bundled_co_entry_id.substr(1);
   return true;
 }
@@ -325,8 +373,8 @@ bool isCodeObjectCompatibleWithDevice(std::string co_triple_target_id,
   if (co_triple_target_id == agent_triple_target_id) return true;
 
   // Parse code object triple target id
-  if (!consume(co_triple_target_id, std::string(OFFLOAD_KIND_HIP) + "-" 
-                                    + std::string(AMDGCN_TARGET_TRIPLE))) {
+  if (!consume(co_triple_target_id,
+               std::string(OFFLOAD_KIND_HIP) + "-" + std::string(AMDGCN_TARGET_TRIPLE))) {
     return false;
   }
 
@@ -372,18 +420,17 @@ bool UnbundleBitCode(const std::vector<char>& bundled_llvm_bitcode, const std::s
     return true;
   }
 
-  std::string bundled_llvm_bitcode_s(bundled_llvm_bitcode.begin(), bundled_llvm_bitcode.begin()
-                                                                   + bundled_llvm_bitcode.size());
+  std::string bundled_llvm_bitcode_s(bundled_llvm_bitcode.begin(),
+                                     bundled_llvm_bitcode.begin() + bundled_llvm_bitcode.size());
   const void* data = reinterpret_cast<const void*>(bundled_llvm_bitcode_s.c_str());
-  const auto obheader
-    = reinterpret_cast<const __ClangOffloadBundleHeader*>(data);
+  const auto obheader = reinterpret_cast<const __ClangOffloadBundleHeader*>(data);
   const auto* desc = &obheader->desc[0];
-  for (uint64_t idx=0; idx < obheader->numOfCodeObjects; ++idx,
+  for (uint64_t idx = 0; idx < obheader->numOfCodeObjects; ++idx,
                 desc = reinterpret_cast<const __ClangOffloadBundleInfo*>(
-                       reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) +
-                       desc->bundleEntryIdSize)) {
-    const void* image = reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(obheader) +
-                                                      desc->offset);
+                    reinterpret_cast<uintptr_t>(&desc->bundleEntryId[0]) +
+                    desc->bundleEntryIdSize)) {
+    const void* image =
+        reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(obheader) + desc->offset);
     const size_t image_size = desc->size;
     std::string bundleEntryId{desc->bundleEntryId, desc->bundleEntryIdSize};
 
@@ -391,8 +438,6 @@ bool UnbundleBitCode(const std::vector<char>& bundled_llvm_bitcode, const std::s
     if (isCodeObjectCompatibleWithDevice(bundleEntryId, isa)) {
       co_offset = (reinterpret_cast<uintptr_t>(image) - reinterpret_cast<uintptr_t>(data));
       co_size = image_size;
-      std::cout<<"bundleEntryId: "<<bundleEntryId<<" Isa:"<<isa<<" Offset: "<<co_offset<<" Size: "
-               << co_size <<std::endl;
       break;
     }
   }
@@ -546,9 +591,8 @@ bool compileToBitCode(const amd_comgr_data_set_t compileInputs, const std::strin
     return false;
   }
 
-  if (auto res =
-          amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC,
-                                action, input, output);
+  if (auto res = amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC,
+                                       action, input, output);
       res != AMD_COMGR_STATUS_SUCCESS) {
     extractBuildLog(output, buildLog);
     amd::Comgr::destroy_action_info(action);
@@ -590,7 +634,6 @@ bool linkLLVMBitcode(const amd_comgr_data_set_t linkInputs, const std::string& i
     amd::Comgr::destroy_action_info(action);
     return false;
   }
-
 
   if (auto res = amd::Comgr::do_action(AMD_COMGR_ACTION_ADD_DEVICE_LIBRARIES, action, linkInputs,
                                        dataSetDevLibs);
@@ -720,13 +763,13 @@ bool createExecutable(const amd_comgr_data_set_t linkInputs, const std::string& 
   return true;
 }
 
-void GenerateUniqueFileName(std::string &name) {
+void GenerateUniqueFileName(std::string& name) {
 #if !defined(_WIN32)
-  char *name_template = const_cast<char*>(name.c_str());
+  char* name_template = const_cast<char*>(name.c_str());
   int temp_fd = mkstemp(name_template);
 #else
-  char *name_template = new char[name.length()+1];
-  strcpy_s(name_template, name.length()+1, name.data());
+  char* name_template = new char[name.length() + 1];
+  strcpy_s(name_template, name.length() + 1, name.data());
   int sizeinchars = strnlen(name_template, 20) + 1;
   _mktemp_s(name_template, sizeinchars);
 #endif
@@ -739,7 +782,6 @@ void GenerateUniqueFileName(std::string &name) {
 
 bool dumpIsaFromBC(const amd_comgr_data_set_t isaInputs, const std::string& isa,
                    std::vector<std::string>& exeOptions, std::string name, std::string& buildLog) {
-
   amd_comgr_action_info_t action;
 
   if (auto res = createAction(action, exeOptions, isa); res != AMD_COMGR_STATUS_SUCCESS) {
@@ -869,11 +911,11 @@ std::string handleMangledName(std::string loweredName) {
   return loweredName;
 }
 
-bool fillMangledNames(std::vector<char>& dataVec,
-                      std::vector<std::string>& mangledNames, bool isBitcode) {
+bool fillMangledNames(std::vector<char>& dataVec, std::vector<std::string>& mangledNames,
+                      bool isBitcode) {
   amd_comgr_data_t dataObject;
-  if (auto res = amd::Comgr::create_data(isBitcode ? AMD_COMGR_DATA_KIND_BC :
-                                         AMD_COMGR_DATA_KIND_EXECUTABLE, &dataObject);
+  if (auto res = amd::Comgr::create_data(
+          isBitcode ? AMD_COMGR_DATA_KIND_BC : AMD_COMGR_DATA_KIND_EXECUTABLE, &dataObject);
       res != AMD_COMGR_STATUS_SUCCESS) {
     return false;
   }
@@ -896,7 +938,7 @@ bool fillMangledNames(std::vector<char>& dataVec,
       return false;
     }
 
-    char *mName = new char[Size]();
+    char* mName = new char[Size]();
     if (auto res = amd::Comgr::get_mangled_name(dataObject, i, &Size, mName)) {
       amd::Comgr::release_data(dataObject);
       return false;
@@ -911,7 +953,7 @@ bool fillMangledNames(std::vector<char>& dataVec,
 }
 
 bool getDemangledNames(const std::vector<std::string>& mangledNames,
-                     std::map<std::string, std::string>& demangledNames) {
+                       std::map<std::string, std::string>& demangledNames) {
   for (auto& i : mangledNames) {
     std::string demangledName;
     if (!demangleName(i, demangledName)) return false;

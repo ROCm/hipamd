@@ -31,8 +31,6 @@ THE SOFTWARE.
 #include "platform/program.hpp"
 #include <elf/elf.hpp>
 
-hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                      amd::HostQueue& queue, bool isAsync = false);
 hipError_t ihipFree(void* ptr);
 // forward declaration of methods required for managed variables
 hipError_t ihipMallocManaged(void** ptr, size_t size, unsigned int align = 0);
@@ -172,6 +170,11 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       sramEccSupported = false;
       proc_name = "gfx90c";
       break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX940:
+      xnackSupported = true;
+      sramEccSupported = true;
+      proc_name = "gfx940";
+      break;
     case EF_AMDGPU_MACH_AMDGCN_GFX1010:
       xnackSupported = true;
       sramEccSupported = false;
@@ -186,6 +189,11 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       xnackSupported = true;
       sramEccSupported = false;
       proc_name = "gfx1012";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1013:
+      xnackSupported = true;
+      sramEccSupported = false;
+      proc_name = "gfx1013";
       break;
     case EF_AMDGPU_MACH_AMDGCN_GFX1030:
       xnackSupported = false;
@@ -207,14 +215,48 @@ static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupp
       sramEccSupported = false;
       proc_name = "gfx1033";
       break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1034:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1034";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1035:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1035";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1036:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1036";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1100";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1101:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1101";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1102:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1102";
+      break;
+    case EF_AMDGPU_MACH_AMDGCN_GFX1103:
+      xnackSupported = false;
+      sramEccSupported = false;
+      proc_name = "gfx1103";
+      break;
     default:
       return false;
   }
   return true;
 }
 
-static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string& target_id,
-                                            unsigned& co_version) {
+static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string& target_id) {
   if (!code_object) return false;
   const Elf64_Ehdr* ehdr = reinterpret_cast<const Elf64_Ehdr*>(code_object);
   if (ehdr->e_machine != EM_AMDGPU) return false;
@@ -228,12 +270,12 @@ static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string
 
   switch (ehdr->e_ident[EI_ABIVERSION]) {
     case ELFABIVERSION_AMDGPU_HSA_V2: {
-      co_version = 2;
+      LogPrintfInfo("[Code Object V2, target id:%s]", target_id.c_str());
       return false;
     }
 
     case ELFABIVERSION_AMDGPU_HSA_V3: {
-      co_version = 3;
+      LogPrintfInfo("[Code Object V3, target id:%s]", target_id.c_str());
       if (isSramEccSupported) {
         if (ehdr->e_flags & EF_AMDGPU_FEATURE_SRAMECC_V3)
           target_id += ":sramecc+";
@@ -249,8 +291,13 @@ static bool getTripleTargetIDFromCodeObject(const void* code_object, std::string
       break;
     }
 
-    case ELFABIVERSION_AMDGPU_HSA_V4: {
-      co_version = 4;
+    case ELFABIVERSION_AMDGPU_HSA_V4:
+    case ELFABIVERSION_AMDGPU_HSA_V5: {
+      if (ehdr->e_ident[EI_ABIVERSION] & ELFABIVERSION_AMDGPU_HSA_V4) {
+        LogPrintfInfo("[Code Object V4, target id:%s]", target_id.c_str());
+      } else {
+        LogPrintfInfo("[Code Object V5, target id:%s]", target_id.c_str());
+      }
       unsigned co_sram_value = (ehdr->e_flags) & EF_AMDGPU_FEATURE_SRAMECC_V4;
       if (co_sram_value == EF_AMDGPU_FEATURE_SRAMECC_OFF_V4)
         target_id += ":sramecc-";
@@ -318,18 +365,17 @@ static bool getTargetIDValue(std::string& input, std::string& processor, char& s
 }
 
 static bool getTripleTargetID(std::string bundled_co_entry_id, const void* code_object,
-                              std::string& co_triple_target_id, unsigned& co_version) {
+                              std::string& co_triple_target_id) {
   std::string offload_kind = trimName(bundled_co_entry_id, '-');
   if (offload_kind != OFFLOAD_KIND_HIPV4 && offload_kind != OFFLOAD_KIND_HIP &&
       offload_kind != OFFLOAD_KIND_HCC)
     return false;
 
   if (offload_kind != OFFLOAD_KIND_HIPV4)
-    return getTripleTargetIDFromCodeObject(code_object, co_triple_target_id, co_version);
+    return getTripleTargetIDFromCodeObject(code_object, co_triple_target_id);
 
   // For code object V4 onwards the bundled code object entry ID correctly
-  // specifies the target tripple.
-  co_version = 4;
+  // specifies the target triple.
   co_triple_target_id = bundled_co_entry_id.substr(1);
   return true;
 }
@@ -442,9 +488,8 @@ hipError_t CodeObject::extractCodeObjectFromFatBinary(
     if (num_code_objs == 0) break;
     std::string bundleEntryId{desc->bundleEntryId, desc->bundleEntryIdSize};
 
-    unsigned co_version = 0;
     std::string co_triple_target_id;
-    if (!getTripleTargetID(bundleEntryId, image, co_triple_target_id, co_version)) continue;
+    if (!getTripleTargetID(bundleEntryId, image, co_triple_target_id)) continue;
 
     for (size_t dev = 0; dev < agent_triple_target_ids.size(); ++dev) {
       if (code_objs[dev].first) continue;
@@ -475,12 +520,11 @@ hipError_t CodeObject::extractCodeObjectFromFatBinary(
       const void* image =
           reinterpret_cast<const void*>(reinterpret_cast<uintptr_t>(obheader) + desc->offset);
 
-      unsigned co_version = 0;
       std::string co_triple_target_id;
-      bool valid_co = getTripleTargetID(bundleEntryId, image, co_triple_target_id, co_version);
+      bool valid_co = getTripleTargetID(bundleEntryId, image, co_triple_target_id);
 
       if (valid_co) {
-        LogPrintfError("    %s - [code object v%u is %s]", bundleEntryId.c_str(), co_version,
+        LogPrintfError("    %s - [code object targetID is %s]", bundleEntryId.c_str(),
                        co_triple_target_id.c_str());
       } else {
         LogPrintfError("    %s - [Unsupported]", bundleEntryId.c_str());
@@ -590,10 +634,10 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   it->second->setManagedVarInfo(pointer, dvar->size());
 
   // copy initial value to the managed variable to the managed memory allocated
-  amd::HostQueue* queue = hip::getNullStream();
-  if (queue != nullptr) {
+  hip::Stream* stream = hip::getNullStream();
+  if (stream != nullptr) {
     status = ihipMemcpy(pointer, reinterpret_cast<address>(dvar->device_ptr()), dvar->size(),
-                        hipMemcpyDeviceToDevice, *queue);
+                        hipMemcpyDeviceToDevice, *stream);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
               managedVar.c_str());
@@ -613,7 +657,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   }
   // copy managed memory pointer to the managed device variable
   status = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), &pointer, dvar->size(),
-                      hipMemcpyHostToDevice, *queue);
+                      hipMemcpyHostToDevice, *stream);
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
             managedVar.c_str());
@@ -850,10 +894,10 @@ hipError_t StatCO::initStatManagedVarDevicePtr(int deviceId) {
       DeviceVar* dvar = nullptr;
       IHIP_RETURN_ONFAIL(var->getStatDeviceVar(&dvar, deviceId));
 
-      amd::HostQueue* queue = g_devices.at(deviceId)->NullStream();
-      if (queue != nullptr) {
+      hip::Stream* stream = g_devices.at(deviceId)->NullStream();
+      if (stream != nullptr) {
         err = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), var->getManagedVarPtr(),
-                         dvar->size(), hipMemcpyHostToDevice, *queue);
+                         dvar->size(), hipMemcpyHostToDevice, *stream);
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
         return hipErrorInvalidResourceHandle;
