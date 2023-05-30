@@ -31,7 +31,7 @@ git clone -b $HIP_BRANCH https://github.com/RadeonOpenCompute/ROCm-OpenCL-Runtim
 ```bash
 export HIPAMD_DIR="$(readlink -f hipamd)"
 export HIP_DIR="$(readlink -f hip)"
-export ROCclr_DIR="$(readlink -f ROCclr)"
+export ROCCLR_DIR="$(readlink -f ROCclr)"
 export OPENCL_DIR="$(readlink -f ROCm-OpenCL-Runtime)"
 ```
 
